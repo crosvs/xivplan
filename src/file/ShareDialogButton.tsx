@@ -34,7 +34,8 @@ import { useScene, useSetSource } from '../SceneProvider';
 import { sceneToText } from '../file';
 import type { Scene } from '../scene';
 import { useIsDirty, useSetSavedState } from '../useIsDirty';
-import { getNostrPubkey, getNostrShareUrl, publishPlan } from './nostr';
+import { removeFileExtension } from '../util';
+import { getNostrPubkey, getNostrShareUrl, publishPlan, sanitizePlanName } from './nostr';
 import { KeySection } from './FileDialogNostr';
 import { RelayPublishList } from './RelayPublishList';
 import { RelayStatusDot } from './RelayStatusDot';
@@ -153,7 +154,7 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
     const { dispatchToast } = useToastController();
     const ownPubkeyState = useAsync(getNostrPubkey);
 
-    const [name, setName] = useState(isNostr ? source.name : '');
+    const [name, setName] = useState(() => sanitizePlanName(removeFileExtension(source?.name ?? '')));
     const [visibility, setVisibility] = useState<'public' | 'private'>(() =>
         isNostr && source.visibility === 'private' ? 'private' : 'public',
     );
@@ -206,11 +207,11 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
                 </MessageBar>
             )}
 
-            <Field label="Plan name">
+            <Field label="Plan name" hint="Letters, numbers, spaces, hyphens, and underscores only.">
                 <Input
                     value={name}
                     placeholder="e.g. p1-progression-week1"
-                    onChange={(_, d) => setName(d.value)}
+                    onChange={(_, d) => setName(sanitizePlanName(d.value))}
                     onKeyUp={onKeyUp}
                     disabled={publishState.loading}
                     autoFocus={!isNostr}

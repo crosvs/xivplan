@@ -160,7 +160,12 @@ export function parseInputPubkey(input: string): string {
 // ── URL helpers ───────────────────────────────────────────────────────────────
 
 export function getNostrShareUrl(pubkey: string, dtag: string): string {
-    return `${location.protocol}//${location.host}${location.pathname}#/nostr/${pubkey}/${dtag}`;
+    return `${location.protocol}//${location.host}${location.pathname}#/nostr/${pubkey}/${encodeURIComponent(dtag)}`;
+}
+
+/** Strips characters that are unsafe in a URL path segment or Nostr d-tag. Spaces are allowed. */
+export function sanitizePlanName(name: string): string {
+    return name.replace(/[^a-zA-Z0-9 \-_]/g, '');
 }
 
 // ── Fan-fetch helpers (parallel, deduplicated, status-tracking) ───────────────
