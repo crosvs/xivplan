@@ -1,25 +1,34 @@
-import { Checkbox, Field, Label, Select, Slider, SliderOnChangeData, makeStyles, tokens } from '@fluentui/react-components';
+import {
+    Checkbox,
+    Field,
+    Label,
+    Select,
+    Slider,
+    SliderOnChangeData,
+    makeStyles,
+    tokens,
+} from '@fluentui/react-components';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useScene } from '../../SceneProvider';
 import { AnimationProps, EasingStyle, PulseStyle, SceneObject } from '../../scene';
 import { commonValue } from '../../util';
-import { useOptionalPlayback } from '../../playback/PlaybackContext';
+import { useOptionalPlaybackDispatch } from '../../playback/PlaybackContext';
 import { PropertiesControlProps } from '../PropertiesControl';
 
 // ─── Easing options ───────────────────────────────────────────────────────────
 
 const EASING_OPTIONS: { value: EasingStyle; label: string }[] = [
-    { value: 'instant',    label: 'Instant'    },
-    { value: 'linear',     label: 'Linear'     },
-    { value: 'easeIn',     label: 'Ease In'    },
-    { value: 'easeOut',    label: 'Ease Out'   },
-    { value: 'easeInOut',  label: 'Ease In-Out'},
-    { value: 'easeInCirc', label: 'Circ In'    },
-    { value: 'easeOutCirc',label: 'Circ Out'   },
+    { value: 'instant', label: 'Instant' },
+    { value: 'linear', label: 'Linear' },
+    { value: 'easeIn', label: 'Ease In' },
+    { value: 'easeOut', label: 'Ease Out' },
+    { value: 'easeInOut', label: 'Ease In-Out' },
+    { value: 'easeInCirc', label: 'Circ In' },
+    { value: 'easeOutCirc', label: 'Circ Out' },
 ];
 
 const PULSE_OPTIONS: { value: PulseStyle; label: string }[] = [
-    { value: 'none',  label: 'None'  },
+    { value: 'none', label: 'None' },
     { value: 'pulse', label: 'Pulse' },
     { value: 'blink', label: 'Blink' },
 ];
@@ -28,14 +37,22 @@ const PULSE_OPTIONS: { value: PulseStyle; label: string }[] = [
 
 function sampleEasing(style: EasingStyle, t: number): number {
     switch (style) {
-        case 'instant':     return t > 0 ? 1 : 0;
-        case 'linear':      return t;
-        case 'easeIn':      return t * t;
-        case 'easeOut':     return 1 - (1 - t) * (1 - t);
-        case 'easeInOut':   return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
-        case 'easeInCirc':  return 1 - Math.sqrt(Math.max(0, 1 - t * t));
-        case 'easeOutCirc': return Math.sqrt(Math.max(0, 1 - (1 - t) * (1 - t)));
-        default:            return t;
+        case 'instant':
+            return t > 0 ? 1 : 0;
+        case 'linear':
+            return t;
+        case 'easeIn':
+            return t * t;
+        case 'easeOut':
+            return 1 - (1 - t) * (1 - t);
+        case 'easeInOut':
+            return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
+        case 'easeInCirc':
+            return 1 - Math.sqrt(Math.max(0, 1 - t * t));
+        case 'easeOutCirc':
+            return Math.sqrt(Math.max(0, 1 - (1 - t) * (1 - t)));
+        default:
+            return t;
     }
 }
 
@@ -97,8 +114,8 @@ function makePath(
 }
 
 function CombinedCurve({ enterEase, exitEase, enterStart, exitEnd }: CombinedCurveProps) {
-    const W  = 240;
-    const H  = 64;
+    const W = 240;
+    const H = 64;
     const px = 6;
     const py = 6;
     const iW = W - px * 2;
@@ -112,54 +129,60 @@ function CombinedCurve({ enterEase, exitEase, enterStart, exitEnd }: CombinedCur
     // t_local =  0 → "now" (opacity = 1)
     // Map to interpolation t: t = t_local + 1  (−1..0 → 0..1)
     const enterToSvgX = (tLocal: number) => xCenter + (tLocal / 1) * (iW / 2);
-    const enterBreak  = enterStart - 1; // enterStart in [0,1] → local [-1,0]
-    const enterPts = makePath(
-        (tLocal) => enterOpacity(enterEase, enterStart, tLocal + 1),
-        -1, 0,
-        enterToSvgX,
-        iH, py,
-        [enterBreak],
-    );
+    const enterBreak = enterStart - 1; // enterStart in [0,1] → local [-1,0]
+    const enterPts = makePath((tLocal) => enterOpacity(enterEase, enterStart, tLocal + 1), -1, 0, enterToSvgX, iH, py, [
+        enterBreak,
+    ]);
 
     // ── Exit curve: local t in [0, 1] ────────────────────────────────────────
     // t_local = 0 → "now" (opacity = 1)
     // t_local = 1 → end of next transition (opacity = 0 after exitEnd)
     // Map directly to interpolation t
     const exitToSvgX = (tLocal: number) => xCenter + tLocal * (iW / 2);
-    const exitPts = makePath(
-        (tLocal) => exitOpacity(exitEase, exitEnd, tLocal),
-        0, 1,
-        exitToSvgX,
-        iH, py,
-        [exitEnd],
-    );
+    const exitPts = makePath((tLocal) => exitOpacity(exitEase, exitEnd, tLocal), 0, 1, exitToSvgX, iH, py, [exitEnd]);
 
     // Vertical slider markers
-    const xEnterMarker = enterToSvgX(enterBreak);  // where enter animation starts
-    const xExitMarker  = exitToSvgX(exitEnd);        // where exit animation ends
+    const xEnterMarker = enterToSvgX(enterBreak); // where enter animation starts
+    const xExitMarker = exitToSvgX(exitEnd); // where exit animation ends
 
     const yMid = py + iH / 2;
 
     return (
-        <svg
-            viewBox={`0 0 ${W} ${H}`}
-            width="100%"
-            height={H}
-            style={{ display: 'block', overflow: 'visible' }}
-        >
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block', overflow: 'visible' }}>
             {/* Baseline (opacity=0) */}
-            <line x1={px} y1={py + iH} x2={px + iW} y2={py + iH}
-                stroke={tokens.colorNeutralStroke2} strokeWidth="1" />
+            <line x1={px} y1={py + iH} x2={px + iW} y2={py + iH} stroke={tokens.colorNeutralStroke2} strokeWidth="1" />
             {/* Top line (opacity=1) */}
-            <line x1={px} y1={py} x2={px + iW} y2={py}
-                stroke={tokens.colorNeutralStroke2} strokeWidth="1" strokeDasharray="2 3" />
+            <line
+                x1={px}
+                y1={py}
+                x2={px + iW}
+                y2={py}
+                stroke={tokens.colorNeutralStroke2}
+                strokeWidth="1"
+                strokeDasharray="2 3"
+            />
             {/* Mid-opacity guideline */}
-            <line x1={px} y1={yMid} x2={px + iW} y2={yMid}
-                stroke={tokens.colorNeutralStroke2} strokeWidth="1" strokeDasharray="1 4" opacity="0.4" />
+            <line
+                x1={px}
+                y1={yMid}
+                x2={px + iW}
+                y2={yMid}
+                stroke={tokens.colorNeutralStroke2}
+                strokeWidth="1"
+                strokeDasharray="1 4"
+                opacity="0.4"
+            />
 
             {/* Center divider — "now" */}
-            <line x1={xCenter} y1={py} x2={xCenter} y2={py + iH}
-                stroke={tokens.colorNeutralForeground3} strokeWidth="1" opacity="0.6" />
+            <line
+                x1={xCenter}
+                y1={py}
+                x2={xCenter}
+                y2={py + iH}
+                stroke={tokens.colorNeutralForeground3}
+                strokeWidth="1"
+                opacity="0.6"
+            />
 
             {/* Enter curve — brand blue (left half) */}
             <polyline
@@ -181,13 +204,27 @@ function CombinedCurve({ enterEase, exitEase, enterStart, exitEnd }: CombinedCur
             />
 
             {/* Enter start marker (dashed, blue) */}
-            <line x1={xEnterMarker} y1={py} x2={xEnterMarker} y2={py + iH}
+            <line
+                x1={xEnterMarker}
+                y1={py}
+                x2={xEnterMarker}
+                y2={py + iH}
                 stroke={tokens.colorBrandForeground1}
-                strokeWidth="1" strokeDasharray="3 2" opacity="0.7" />
+                strokeWidth="1"
+                strokeDasharray="3 2"
+                opacity="0.7"
+            />
             {/* Exit end marker (dashed, orange) */}
-            <line x1={xExitMarker} y1={py} x2={xExitMarker} y2={py + iH}
+            <line
+                x1={xExitMarker}
+                y1={py}
+                x2={xExitMarker}
+                y2={py + iH}
                 stroke={tokens.colorStatusWarningForeground1}
-                strokeWidth="1" strokeDasharray="3 2" opacity="0.7" />
+                strokeWidth="1"
+                strokeDasharray="3 2"
+                opacity="0.7"
+            />
         </svg>
     );
 }
@@ -195,8 +232,10 @@ function CombinedCurve({ enterEase, exitEase, enterStart, exitEnd }: CombinedCur
 // ─── Preview hook ─────────────────────────────────────────────────────────────
 
 function useEasingPreview(active: boolean, baseStep: number, stepsCount: number) {
-    const playback = useOptionalPlayback();
-    const rafRef   = useRef<number>(0);
+    // Use stable dispatch context so this effect never re-runs due to playbackTime
+    // advancing — only re-runs when active/baseStep/stepsCount actually change.
+    const dispatch = useOptionalPlaybackDispatch();
+    const rafRef = useRef<number>(0);
     const startRef = useRef<number | null>(null);
     const PERIOD_MS = 2000;
 
@@ -206,48 +245,50 @@ function useEasingPreview(active: boolean, baseStep: number, stepsCount: number)
     }, []);
 
     useEffect(() => {
-        if (!active || !playback || stepsCount < 2) {
+        if (!active || !dispatch || stepsCount < 2) {
             stop();
             return;
         }
-        const maxStep  = stepsCount - 1;
+        const maxStep = stepsCount - 1;
         const fromStep = Math.min(baseStep, maxStep - 1);
 
         const tick = (now: number) => {
             if (startRef.current === null) startRef.current = now;
             const frac = ((now - startRef.current) % PERIOD_MS) / PERIOD_MS;
-            playback.setPlaybackTime(fromStep + frac);
+            dispatch.setPlaybackTime(fromStep + frac);
             rafRef.current = requestAnimationFrame(tick);
         };
         rafRef.current = requestAnimationFrame(tick);
         return () => {
             stop();
-            playback.setPlaybackTime(Math.round(playback.state.playbackTime));
+            // Read current time via ref to avoid stale closure.
+            dispatch.setPlaybackTime(Math.round(dispatch.playbackTimeRef.current));
         };
-    }, [active, baseStep, stepsCount, playback, stop]);
+    }, [active, baseStep, stepsCount, dispatch, stop]);
 }
 
 // ─── Main control ─────────────────────────────────────────────────────────────
 
 export const AnimationControl: React.FC<PropertiesControlProps<SceneObject>> = ({ objects }) => {
-    const classes  = useStyles();
+    const classes = useStyles();
     const { dispatch, scene } = useScene();
-    const playback = useOptionalPlayback();
+    const playbackDispatch = useOptionalPlaybackDispatch();
 
     // Keyed to current selection so preview auto-stops when selection changes
     const [previewForIds, setPreviewForIds] = useState<string | null>(null);
-    const objectIds  = objects.map((o) => o.id).join(',');
+    const objectIds = objects.map((o) => o.id).join(',');
     const showPreview = previewForIds === objectIds;
 
-    const baseStep   = playback ? Math.floor(playback.state.playbackTime) : 0;
+    // Read current playback time from ref (no subscription — won't re-render on every frame).
+    const baseStep = playbackDispatch ? Math.floor(playbackDispatch.playbackTimeRef.current) : 0;
     const stepsCount = scene.steps.length;
     useEasingPreview(showPreview, baseStep, stepsCount);
 
-    const enterEase  = commonValue(objects, (obj) => obj.animation?.enterEase  ?? 'instant') ?? 'instant';
-    const exitEase   = commonValue(objects, (obj) => obj.animation?.exitEase   ?? 'instant') ?? 'instant';
+    const enterEase = commonValue(objects, (obj) => obj.animation?.enterEase ?? 'instant') ?? 'instant';
+    const exitEase = commonValue(objects, (obj) => obj.animation?.exitEase ?? 'instant') ?? 'instant';
     const enterStart = commonValue(objects, (obj) => obj.animation?.enterStart ?? 0.5) ?? 0.5;
-    const exitEnd    = commonValue(objects, (obj) => obj.animation?.exitEnd    ?? 0.5) ?? 0.5;
-    const pulse      = commonValue(objects, (obj) => obj.animation?.pulse      ?? 'none') ?? 'none';
+    const exitEnd = commonValue(objects, (obj) => obj.animation?.exitEnd ?? 0.5) ?? 0.5;
+    const pulse = commonValue(objects, (obj) => obj.animation?.pulse ?? 'none') ?? 'none';
     const smoothness = commonValue(objects, (obj) => obj.animation?.smoothness ?? 0) ?? 0;
 
     const [dragging, setDragging] = useState(false);
@@ -260,9 +301,11 @@ export const AnimationControl: React.FC<PropertiesControlProps<SceneObject>> = (
         });
     }
 
-    const onEnterStartChange = (_: unknown, d: SliderOnChangeData) => updateAnimation({ enterStart: d.value }, dragging);
-    const onExitEndChange    = (_: unknown, d: SliderOnChangeData) => updateAnimation({ exitEnd: d.value }, dragging);
-    const onSmoothnessChange = (_: unknown, d: SliderOnChangeData) => updateAnimation({ smoothness: d.value }, dragging);
+    const onEnterStartChange = (_: unknown, d: SliderOnChangeData) =>
+        updateAnimation({ enterStart: d.value }, dragging);
+    const onExitEndChange = (_: unknown, d: SliderOnChangeData) => updateAnimation({ exitEnd: d.value }, dragging);
+    const onSmoothnessChange = (_: unknown, d: SliderOnChangeData) =>
+        updateAnimation({ smoothness: d.value }, dragging);
 
     return (
         <div className={classes.root}>
@@ -275,7 +318,9 @@ export const AnimationControl: React.FC<PropertiesControlProps<SceneObject>> = (
                         size="small"
                     >
                         {EASING_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                            </option>
                         ))}
                     </Select>
                 </Field>
@@ -286,47 +331,44 @@ export const AnimationControl: React.FC<PropertiesControlProps<SceneObject>> = (
                         size="small"
                     >
                         {EASING_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                            </option>
                         ))}
                     </Select>
                 </Field>
             </div>
 
             {/* ── Combined curve ── */}
-            <CombinedCurve
-                enterEase={enterEase}
-                exitEase={exitEase}
-                enterStart={enterStart}
-                exitEnd={exitEnd}
-            />
+            <CombinedCurve enterEase={enterEase} exitEase={exitEase} enterStart={enterStart} exitEnd={exitEnd} />
 
             {/* ── Timing sliders: side-by-side, each spanning one half of the curve ── */}
             <div className={classes.slidersRow}>
                 <div className={classes.halfSlider}>
                     <Slider
-                        min={0} max={1} step={0.05}
+                        min={0}
+                        max={1}
+                        step={0.05}
                         value={enterStart}
                         onChange={onEnterStartChange}
                         onMouseDown={() => setDragging(true)}
                         onMouseUp={() => setDragging(false)}
                         size="small"
                     />
-                    <Label className={classes.sliderCaptionEnter}>
-                        Start {Math.round(enterStart * 100)}%
-                    </Label>
+                    <Label className={classes.sliderCaptionEnter}>Start {Math.round(enterStart * 100)}%</Label>
                 </div>
                 <div className={classes.halfSlider}>
                     <Slider
-                        min={0} max={1} step={0.05}
+                        min={0}
+                        max={1}
+                        step={0.05}
                         value={exitEnd}
                         onChange={onExitEndChange}
                         onMouseDown={() => setDragging(true)}
                         onMouseUp={() => setDragging(false)}
                         size="small"
                     />
-                    <Label className={classes.sliderCaptionExit}>
-                        End {Math.round(exitEnd * 100)}%
-                    </Label>
+                    <Label className={classes.sliderCaptionExit}>End {Math.round(exitEnd * 100)}%</Label>
                 </div>
             </div>
 
@@ -336,7 +378,9 @@ export const AnimationControl: React.FC<PropertiesControlProps<SceneObject>> = (
             <div className={classes.smoothRow}>
                 <Label className={classes.smoothLabel}>Smooth</Label>
                 <Slider
-                    min={0} max={1} step={0.05}
+                    min={0}
+                    max={1}
+                    step={0.05}
                     value={smoothness}
                     onChange={onSmoothnessChange}
                     onMouseDown={() => setDragging(true)}
@@ -344,9 +388,7 @@ export const AnimationControl: React.FC<PropertiesControlProps<SceneObject>> = (
                     size="small"
                     className={classes.smoothSlider}
                 />
-                <Label className={classes.smoothValueLabel}>
-                    {Math.round(smoothness * 100)}%
-                </Label>
+                <Label className={classes.smoothValueLabel}>{Math.round(smoothness * 100)}%</Label>
             </div>
 
             <div className={classes.divider} />
@@ -359,13 +401,15 @@ export const AnimationControl: React.FC<PropertiesControlProps<SceneObject>> = (
                     size="small"
                 >
                     {PULSE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                        </option>
                     ))}
                 </Select>
             </Field>
 
             {/* ── Preview ── */}
-            {playback && stepsCount >= 2 && (
+            {playbackDispatch && stepsCount >= 2 && (
                 <Checkbox
                     label="Show preview"
                     checked={showPreview}

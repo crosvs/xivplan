@@ -10,12 +10,13 @@ import { SelectionContext, SelectionState, SpotlightContext } from '../Selection
 import { getCanvasSize, getSceneCoord } from '../coord';
 import { EditMode } from '../editMode';
 import { Scene } from '../scene';
-import { selectNewObjects, selectNone, useSelection } from '../selection';
+import { selectNewObjects, selectNone, useCrossStepSelection, useSelection } from '../selection';
 import { UndoContext } from '../undo/undoContext';
 import { useEditMode } from '../useEditMode';
 import { usePanelDrag } from '../usePanelDrag';
-import { useDisplayObjects } from '../playback/PlaybackContext';
+import { StaticPlaybackProvider, useDisplayObjects } from '../playback/PlaybackContext';
 import { ArenaRenderer } from './ArenaRenderer';
+import { DisplayObjectsContext } from './DisplayObjectsContext';
 import { DrawTarget } from './DrawTarget';
 import { ObjectRenderer } from './ObjectRenderer';
 import { StageContext } from './StageContext';
@@ -25,6 +26,7 @@ import { LayerName } from './layers';
 export const SceneRenderer: React.FC = () => {
     const { scene } = useScene();
     const [, setSelection] = useContext(SelectionContext);
+    const { setSelection: setCrossStep } = useCrossStepSelection();
     const size = getCanvasSize(scene);
     const [stage, stageRef] = useState<Konva.Stage | null>(null);
     const [editMode] = useEditMode();
@@ -35,9 +37,10 @@ export const SceneRenderer: React.FC = () => {
         if (editMode === EditMode.SelectConnection) {
             return;
         }
-        // Clicking on nothing (with no modifier keys held) should cancel selection.
+        // Clicking on nothing (with no modifier keys held) should cancel all selections.
         if (!e.evt.ctrlKey && !e.evt.shiftKey) {
             setSelection(selectNone());
+            setCrossStep(new Map());
         }
     };
 
@@ -59,6 +62,10 @@ export const SceneRenderer: React.FC = () => {
 export interface ScenePreviewProps extends RefAttributes<Konva.Stage> {
     scene: Scene;
     stepIndex?: number;
+    /** Fractional playback time (0 to steps.length-1). Overrides stepIndex for interpolated previews. */
+    playbackTime?: number;
+    /** Pulse time in seconds for pulse animations. Only relevant when playbackTime is provided. */
+    pulseTime?: number;
     width?: number;
     height?: number;
     backgroundColor?: string;
@@ -70,6 +77,8 @@ export const ScenePreview: React.FC<ScenePreviewProps> = ({
     ref,
     scene,
     stepIndex,
+    playbackTime,
+    pulseTime,
     width,
     height,
     backgroundColor,
@@ -97,9 +106,12 @@ export const ScenePreview: React.FC<ScenePreviewProps> = ({
         y = (height - size.height) / 2;
     }
 
+    const resolvedPlaybackTime = playbackTime ?? stepIndex ?? 0;
+    const currentStep = Math.min(Math.floor(resolvedPlaybackTime), scene.steps.length - 1);
+
     const present: EditorState = {
         scene,
-        currentStep: stepIndex ?? 0,
+        currentStep,
     };
 
     const sceneContext: UndoContext<EditorState, SceneAction> = [
@@ -121,7 +133,9 @@ export const ScenePreview: React.FC<ScenePreviewProps> = ({
                 <SceneContext value={sceneContext}>
                     <SelectionContext value={selectionContext}>
                         <SpotlightContext value={spotlightContext}>
-                            <SceneContents listening={false} simple={simple} backgroundColor={backgroundColor} />
+                            <StaticPlaybackProvider playbackTime={resolvedPlaybackTime} pulseTime={pulseTime}>
+                                <SceneContents listening={false} simple={simple} backgroundColor={backgroundColor} />
+                            </StaticPlaybackProvider>
                         </SpotlightContext>
                     </SelectionContext>
                 </SceneContext>
@@ -147,7 +161,7 @@ const SceneContents: React.FC<SceneContentsProps> = ({ listening, simple, backgr
     const objects = useDisplayObjects(scene, step.objects);
 
     return (
-        <>
+        <DisplayObjectsContext value={objects}>
             {listening && <SceneHotkeyHandler />}
 
             <Layer name={LayerName.Ground} listening={listening}>
@@ -166,7 +180,7 @@ const SceneContents: React.FC<SceneContentsProps> = ({ listening, simple, backgr
                 <DrawTarget />
             </Layer>
             <Layer name={LayerName.Controls} listening={listening} />
-        </>
+        </DisplayObjectsContext>
     );
 };
 
