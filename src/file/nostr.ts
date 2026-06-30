@@ -186,10 +186,15 @@ async function fanGet(
             }
         }),
     );
+    let best: NostrEvent | null = null;
     for (const r of results) {
-        if (r.status === 'fulfilled' && r.value) return r.value;
+        if (r.status === 'fulfilled' && r.value) {
+            if (!best || r.value.created_at > best.created_at) {
+                best = r.value;
+            }
+        }
     }
-    return null;
+    return best;
 }
 
 async function fanQuery(filter: Parameters<SimplePool['querySync']>[1]): Promise<NostrEvent[]> {
@@ -205,6 +210,7 @@ async function fanQuery(filter: Parameters<SimplePool['querySync']>[1]): Promise
             }
         }),
     );
+    // Merge events from all relays, deduplicating by event ID first.
     const seen = new Set<string>();
     const merged: NostrEvent[] = [];
     for (const r of results) {
@@ -215,7 +221,25 @@ async function fanQuery(filter: Parameters<SimplePool['querySync']>[1]): Promise
             }
         }
     }
-    return merged;
+
+    // NIP-33 parameterized replaceable events (kind 30000–39999): a stale relay may
+    // return an older version under a different event ID. Keep only the newest event
+    // per pubkey+kind+d-tag so the vault never shows duplicates.
+    const newest = new Map<string, NostrEvent>();
+    for (const ev of merged) {
+        if (ev.kind < 30000 || ev.kind >= 40000) continue;
+        const dtag = ev.tags.find((t) => t[0] === 'd')?.[1] ?? '';
+        const key = `${ev.pubkey}:${ev.kind}:${dtag}`;
+        const existing = newest.get(key);
+        if (!existing || ev.created_at > existing.created_at) {
+            newest.set(key, ev);
+        }
+    }
+    return merged.filter((ev) => {
+        if (ev.kind < 30000 || ev.kind >= 40000) return true;
+        const dtag = ev.tags.find((t) => t[0] === 'd')?.[1] ?? '';
+        return newest.get(`${ev.pubkey}:${ev.kind}:${dtag}`) === ev;
+    });
 }
 
 // ── Publish ───────────────────────────────────────────────────────────────────
