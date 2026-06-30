@@ -371,13 +371,11 @@ function setStep(state: Readonly<EditorState>, index: number): EditorState {
 
 function addStep(state: Readonly<EditorState>, after: number, sourceObjects?: readonly SceneObject[]): EditorState {
     // Strip any interpolation-only markers before copying
-    const base = (sourceObjects ?? getCurrentStep(state).objects).map(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (obj) => {
-            const { _ceilOnly, ...rest } = obj as any;
-            return rest as SceneObject;
-        },
-    );
+    const base = (sourceObjects ?? getCurrentStep(state).objects).map((obj) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { _ceilOnly, ...rest } = obj as SceneObject & { _ceilOnly?: boolean };
+        return rest as SceneObject;
+    });
     const { objects, nextId } = copyObjects(state.scene, undefined, base);
 
     const newStep: SceneStep = { objects };

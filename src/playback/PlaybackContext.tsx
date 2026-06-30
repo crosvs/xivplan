@@ -86,9 +86,11 @@ export const PlaybackProvider: React.FC<PropsWithChildren> = ({ children }) => {
     const lastTimeRef = useRef<number | null>(null);
     // Always-current refs exposed via PlaybackDispatchContext for lazy reads in handlers.
     const isPlayingRef = useRef(isPlaying);
-    isPlayingRef.current = isPlaying;
     const playbackTimeRef = useRef(playbackTime);
-    playbackTimeRef.current = playbackTime;
+    useEffect(() => {
+        isPlayingRef.current = isPlaying;
+        playbackTimeRef.current = playbackTime;
+    });
 
     // ── Continuous pulse ticker (always running for pulse/blink effects) ──
     useEffect(() => {
@@ -157,7 +159,6 @@ export const PlaybackProvider: React.FC<PropsWithChildren> = ({ children }) => {
     const dispatchValue = useMemo<PlaybackDispatchValue>(
         () => ({ setPlaybackTime, togglePlay, setSpeed, updateMaxStep, isPlayingRef, playbackTimeRef }),
         // Callbacks are stable (useCallback). Refs are stable objects (useRef). Safe to omit from deps.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
         [setPlaybackTime, togglePlay, setSpeed, updateMaxStep],
     );
 

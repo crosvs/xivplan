@@ -18,12 +18,12 @@ function getPulse(object: SceneObject): PulseStyle {
 interface ObjectGroupProps {
     object: SceneObject;
     listening: boolean;
+    Component: ReturnType<typeof getRenderer>;
 }
 
 // Subscribes to PulseTimeContext — only instances of this component re-render at 60fps.
-const PulsingObjectGroup: React.FC<ObjectGroupProps> = ({ object, listening }) => {
+const PulsingObjectGroup: React.FC<ObjectGroupProps> = ({ object, listening, Component }) => {
     const pulseTime = usePulseTime();
-    const Component = getRenderer(object);
     const pulse = getPulse(object);
 
     let opacity: number | undefined;
@@ -70,8 +70,7 @@ const PulsingObjectGroup: React.FC<ObjectGroupProps> = ({ object, listening }) =
 };
 
 // memo'd — skips re-render when the object reference hasn't changed.
-const StaticObjectGroup = memo(function StaticObjectGroup({ object, listening }: ObjectGroupProps) {
-    const Component = getRenderer(object);
+const StaticObjectGroup = memo(function StaticObjectGroup({ object, listening, Component }: ObjectGroupProps) {
     return (
         <Group listening={listening}>
             <Component object={object} />
@@ -91,13 +90,14 @@ export const ObjectRenderer: React.FC<ObjectRendererProps> = ({ objects, layer }
                 const ceilOnly = (object as { _ceilOnly?: boolean })._ceilOnly === true;
                 const listening = !ceilOnly;
                 const hasPulse = getPulse(object) !== 'none';
+                const Component = getRenderer(object);
 
                 return (
                     <ObjectContext key={object.id} value={object}>
                         {hasPulse ? (
-                            <PulsingObjectGroup object={object} listening={listening} />
+                            <PulsingObjectGroup object={object} listening={listening} Component={Component} />
                         ) : (
-                            <StaticObjectGroup object={object} listening={listening} />
+                            <StaticObjectGroup object={object} listening={listening} Component={Component} />
                         )}
                     </ObjectContext>
                 );

@@ -66,7 +66,9 @@ const MainPageContent: React.FC = () => {
 
     // stepIndexRef captures the step the reducer committed to (e.g. addStep → new step index).
     const stepIndexRef = useRef(stepIndex);
-    stepIndexRef.current = stepIndex;
+    useEffect(() => {
+        stepIndexRef.current = stepIndex;
+    });
 
     // When the user edits the scene, snap playbackTime to the reducer's current step and stop
     // playing. Using stepIndexRef means addStep (which sets currentStep = newStep) will jump the
@@ -83,6 +85,8 @@ const MainPageContent: React.FC = () => {
             }
         }
         initialSceneRef.current = scene;
+        // dispatch/isPlayingRef/maxStep/setPlaybackTime/togglePlay are stable — intentionally omitted.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [scene]);
 
     return (
