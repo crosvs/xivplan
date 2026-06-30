@@ -184,7 +184,14 @@ const LineTetherRenderer: React.FC<TetherProps> = ({ object, scene, step, highli
 const POINTER_LENGTH = 10;
 const POINTER_WIDTH = 10;
 
-const CloseTetherRenderer: React.FC<TetherProps> = ({ object, scene, step, highlightProps, startObject, endObject }) => {
+const CloseTetherRenderer: React.FC<TetherProps> = ({
+    object,
+    scene,
+    step,
+    highlightProps,
+    startObject,
+    endObject,
+}) => {
     const [start, end] = getTetherPoints(scene, step, startObject, endObject);
     const center = vecMult(vecAdd(start, end), 0.5);
     const offset = vecMult(vecUnit(vecSub(end, start)), object.width * 1.25);

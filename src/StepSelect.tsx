@@ -105,12 +105,7 @@ export const StepSelect: React.FC = () => {
                     onTabSelect={handleTabSelect}
                 >
                     {steps.map((i) => (
-                        <StepButton
-                            key={i}
-                            index={i}
-                            hasSimilar={similar.has(i)}
-                            isInCrossStep={crossStep.has(i)}
-                        />
+                        <StepButton key={i} index={i} hasSimilar={similar.has(i)} isInCrossStep={crossStep.has(i)} />
                     ))}
                 </TabList>
             </div>

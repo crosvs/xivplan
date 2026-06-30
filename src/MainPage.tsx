@@ -103,10 +103,7 @@ const MainPageContent: React.FC = () => {
 
             <div className={classes.steps}>
                 {classicMode && <StepSelect />}
-                <PlaybackTimeline
-                    classicMode={classicMode}
-                    onToggleClassicMode={() => setClassicMode((c) => !c)}
-                />
+                <PlaybackTimeline classicMode={classicMode} onToggleClassicMode={() => setClassicMode((c) => !c)} />
             </div>
 
             <div className={classes.stage}>

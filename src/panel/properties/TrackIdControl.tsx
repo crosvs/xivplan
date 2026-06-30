@@ -1,11 +1,4 @@
-import {
-    Button,
-    Combobox,
-    Field,
-    Option,
-    makeStyles,
-    tokens,
-} from '@fluentui/react-components';
+import { Button, Combobox, Field, Option, makeStyles, tokens } from '@fluentui/react-components';
 import { DismissRegular } from '@fluentui/react-icons';
 import React, { useMemo, useState } from 'react';
 import { useScene } from '../../SceneProvider';
@@ -77,7 +70,9 @@ export const TrackIdControl: React.FC<PropertiesControlProps<SceneObject>> = ({ 
                     }}
                 >
                     {filtered.map((id) => (
-                        <Option key={id} value={id}>{id}</Option>
+                        <Option key={id} value={id}>
+                            {id}
+                        </Option>
                     ))}
                 </Combobox>
                 {displayValue && (

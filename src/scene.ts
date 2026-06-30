@@ -54,14 +54,7 @@ export enum ObjectType {
     Triangle = 'triangle',
 }
 
-export type EasingStyle =
-    | 'instant'
-    | 'linear'
-    | 'easeIn'
-    | 'easeOut'
-    | 'easeInOut'
-    | 'easeInCirc'
-    | 'easeOutCirc';
+export type EasingStyle = 'instant' | 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'easeInCirc' | 'easeOutCirc';
 
 export type PulseStyle = 'none' | 'pulse' | 'blink' | 'snapshot' | 'highlight';
 

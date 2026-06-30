@@ -26,9 +26,7 @@ export const SelectionProvider: React.FC<PropsWithChildren> = ({ children }) => 
         <SelectionContext value={state}>
             <SpotlightContext value={spotlightState}>
                 <DragSelectionContext value={dragState}>
-                    <CrossStepContext value={crossStepContextValue}>
-                        {children}
-                    </CrossStepContext>
+                    <CrossStepContext value={crossStepContextValue}>{children}</CrossStepContext>
                 </DragSelectionContext>
             </SpotlightContext>
         </SelectionContext>

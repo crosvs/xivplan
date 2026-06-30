@@ -53,7 +53,7 @@ export const useImageTracked: UseImageType = (url, crossOrigin = 'anonymous', re
 
     // If useImage hasn't resolved yet but we loaded this URL before, return the
     // cached element immediately so the component renders without a blank frame.
-    const cached = (!image && url) ? loadedImageCache.get(url) : undefined;
+    const cached = !image && url ? loadedImageCache.get(url) : undefined;
     const resolvedImage = image ?? cached;
     const resolvedStatus = resolvedImage ? 'loaded' : status;
 

@@ -28,8 +28,13 @@ export const SceneObjectsPanel: React.FC<SceneObjectsPanelProps> = ({ className 
     const { dispatch, step, stepIndex } = useScene();
     const [selection, setSelection] = useSelection();
     const available = useAvailableFilters();
-    const { filters, setFilters, positionTolerance, setPositionTolerance, setSelection: setCrossStep } =
-        useCrossStepSelection();
+    const {
+        filters,
+        setFilters,
+        positionTolerance,
+        setPositionTolerance,
+        setSelection: setCrossStep,
+    } = useCrossStepSelection();
 
     // Clear all filters when selection is empty
     useEffect(() => {

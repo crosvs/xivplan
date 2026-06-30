@@ -52,12 +52,7 @@ function lerpAngle(a: number, b: number, t: number): number {
 function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
     const t2 = t * t;
     const t3 = t2 * t;
-    return 0.5 * (
-        2 * p1 +
-        (-p0 + p2) * t +
-        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-        (-p0 + 3 * p1 - 3 * p2 + p3) * t3
-    );
+    return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
 }
 
 // ─── Easing ───────────────────────────────────────────────────────────────────
@@ -100,13 +95,7 @@ function applyEasing(style: EasingStyle | undefined, t: number): number {
  * Non-numeric properties (type, color, image, etc.) come from `b`.
  * The `id` is kept from `a` so Konva reuses the same canvas node throughout.
  */
-export function lerpObject(
-    a: SceneObject,
-    b: SceneObject,
-    t: number,
-    stepA: SceneStep,
-    stepB: SceneStep,
-): SceneObject {
+export function lerpObject(a: SceneObject, b: SceneObject, t: number, stepA: SceneStep, stepB: SceneStep): SceneObject {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result: any = { ...b, id: a.id };
     // Store step-B id so tethers (whose startId/endId reference step-B object ids) can
@@ -164,8 +153,8 @@ export function lerpObject(
 
     // Hollow — interpolate fill alpha between solid (0) and hollow (1)
     if (supportsHollow(a) && supportsHollow(b)) {
-        const aH = typeof a.hollow === 'number' ? a.hollow : (a.hollow ? 1 : 0);
-        const bH = typeof b.hollow === 'number' ? b.hollow : (b.hollow ? 1 : 0);
+        const aH = typeof a.hollow === 'number' ? a.hollow : a.hollow ? 1 : 0;
+        const bH = typeof b.hollow === 'number' ? b.hollow : b.hollow ? 1 : 0;
         result.hollow = lerp(aH, bH, et);
     }
 
@@ -332,12 +321,8 @@ export function interpolateStep(
                 const posA = getAbsolutePositionInStep(stepA, objA as any);
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const posB = getAbsolutePositionInStep(stepB, objB as any);
-                const posP = (prevObj && isMoveable(prevObj))
-                    ? getAbsolutePositionInStep(stepPrev!, prevObj)
-                    : posA;
-                const posN = (nextObj && isMoveable(nextObj))
-                    ? getAbsolutePositionInStep(stepNext!, nextObj)
-                    : posB;
+                const posP = prevObj && isMoveable(prevObj) ? getAbsolutePositionInStep(stepPrev!, prevObj) : posA;
+                const posN = nextObj && isMoveable(nextObj) ? getAbsolutePositionInStep(stepNext!, nextObj) : posB;
 
                 const ease = (objB as BaseObject).animation?.enterEase ?? 'linear';
                 const et = applyEasing(ease, t);
@@ -405,9 +390,7 @@ export function interpolateStep(
         const alpha = transitionAlpha((objA as BaseObject).animation, t, true);
         if (alpha > 0) {
             const pos = resolveUntrackedPosition(stepA, objA, lerpedByAId);
-            const resolved = pos
-                ? { ...objA, x: pos.x, y: pos.y, positionParentId: undefined }
-                : objA;
+            const resolved = pos ? { ...objA, x: pos.x, y: pos.y, positionParentId: undefined } : objA;
             result.push(applyAlpha(resolved as SceneObject, alpha));
         }
     }
@@ -420,9 +403,7 @@ export function interpolateStep(
         const alpha = transitionAlpha((objB as BaseObject).animation, t, false);
         if (alpha > 0) {
             const pos = resolveUntrackedPosition(stepB, objB, lerpedByBId);
-            const resolved = pos
-                ? { ...objB, x: pos.x, y: pos.y, positionParentId: undefined }
-                : objB;
+            const resolved = pos ? { ...objB, x: pos.x, y: pos.y, positionParentId: undefined } : objB;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             result.push({ ...applyAlpha(resolved as SceneObject, alpha), _ceilOnly: true } as any);
         }

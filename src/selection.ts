@@ -8,7 +8,17 @@ import {
     SelectionState,
     SpotlightContext,
 } from './SelectionContext';
-import { isColored, isImageObject, isMoveable, isRadiusObject, isResizable, ObjectType, Scene, SceneObject, SceneStep } from './scene';
+import {
+    isColored,
+    isImageObject,
+    isMoveable,
+    isRadiusObject,
+    isResizable,
+    ObjectType,
+    Scene,
+    SceneObject,
+    SceneStep,
+} from './scene';
 
 /**
  * State for selected objects.
@@ -274,9 +284,7 @@ export function useSimilarObjects(
                     if (!isMoveable(o)) return false;
                     if (
                         !moveableTemplates.some(
-                            (t) =>
-                                Math.abs(o.x - t.x) <= positionTolerance &&
-                                Math.abs(o.y - t.y) <= positionTolerance,
+                            (t) => Math.abs(o.x - t.x) <= positionTolerance && Math.abs(o.y - t.y) <= positionTolerance,
                         )
                     )
                         return false;

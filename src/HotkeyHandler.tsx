@@ -14,7 +14,14 @@ import { moveObjectsBy } from './groupOperations';
 import { makeTethers } from './prefabs/TetherConfig';
 import { useStage } from './render/stage';
 import { MoveableObject, Scene, SceneObject, SceneStep, TetherType, isMoveable, isRotateable } from './scene';
-import { getSelectedObjects, selectAll, selectNewObjects, selectNone, useCrossStepSelection, useSelection } from './selection';
+import {
+    getSelectedObjects,
+    selectAll,
+    selectNewObjects,
+    selectNone,
+    useCrossStepSelection,
+    useSelection,
+} from './selection';
 import { useCancelConnectionSelection, useEditMode } from './useEditMode';
 import { useHotkeyHelp, useHotkeys } from './useHotkeys';
 import { useTetherConfig } from './useTetherConfig';
