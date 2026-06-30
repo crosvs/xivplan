@@ -40,17 +40,15 @@ export const AboutDialog: React.FC<AboutDialogProps> = (props) => {
                         </p>
                         <p>
                             This fork of XIVPlan is open source on{' '}
-                            <ExternalLink href="https://github.com/Crosvs/xivplan">GitHub</ExternalLink>. If you
-                            find a bug or have other feedback, please create a{' '}
+                            <ExternalLink href="https://github.com/Crosvs/xivplan">GitHub</ExternalLink>. If you find a
+                            bug or have other feedback, please create a{' '}
                             <ExternalLink href="https://github.com/Crosvs/xivplan/issues/new/choose">
                                 new issue
                             </ExternalLink>{' '}
                             on GitHub.
                         </p>
                         <h2>Credits</h2>
-                        <p>
-                            XIVPlan is © 2021 Joel Spadin and contributors. This fork is maintained by Crosvs.
-                        </p>
+                        <p>XIVPlan is © 2021 Joel Spadin and contributors. This fork is maintained by Crosvs.</p>
                         <p>Job, role, waymark, and enemy icons are © SQUARE ENIX CO., LTD. All Rights Reserved.</p>
                         <p>
                             <ExternalLink href="https://magentalava.gumroad.com/l/limitcuticons">

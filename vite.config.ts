@@ -21,7 +21,6 @@ function getEnvOptions(mode: string): UserConfig {
 }
 
 export default defineConfig(({ mode }) => ({
-
     ...getEnvOptions(mode),
     plugins: [
         react(),
