@@ -71,6 +71,7 @@ import {
     parseInputPubkey,
     publishPlan,
     pubkeyToNpub,
+    sanitizePlanName,
 } from './nostr';
 
 const DeleteIcon = bundleIcon(DeleteFilled, DeleteRegular);
@@ -437,13 +438,13 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
             )}
 
             <div className={classes.section}>
-                <Field label="Plan name">
+                <Field label="Plan name" hint="Letters, numbers, spaces, hyphens, and underscores only.">
                     <Input
                         type="text"
                         autoFocus
                         value={name}
                         placeholder="e.g. p1-progression-week1"
-                        onChange={(ev, data) => setName(data.value)}
+                        onChange={(ev, data) => setName(sanitizePlanName(data.value))}
                         onKeyUp={onKeyUp}
                         disabled={isLocked}
                     />
@@ -858,7 +859,7 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                             <Input
                                 autoFocus
                                 value={duplicateName}
-                                onChange={(_, d) => setDuplicateName(d.value)}
+                                onChange={(_, d) => setDuplicateName(sanitizePlanName(d.value))}
                                 placeholder="e.g. p1-copy"
                                 onKeyUp={(e) => e.key === 'Enter' && duplicateName.trim() && startDuplicate()}
                             />
