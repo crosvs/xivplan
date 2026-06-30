@@ -153,7 +153,7 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
     const { dispatchToast } = useToastController();
     const ownPubkeyState = useAsync(getNostrPubkey);
 
-    const [name, setName] = useState(isNostr ? source.name : '');
+    const [name, setName] = useState(source?.name ?? '');
     const [visibility, setVisibility] = useState<'public' | 'private'>(() =>
         isNostr && source.visibility === 'private' ? 'private' : 'public',
     );
