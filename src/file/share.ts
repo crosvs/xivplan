@@ -1,7 +1,9 @@
 import { use, useEffect } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { jsonToScene, sceneToText, textToScene } from '../file';
+import type { FileSource } from '../SceneProvider';
 import { Scene } from '../scene';
+import { getNostrFetchError, getNostrFetchedVisibility, getNostrFetchPromise } from './nostr';
 
 export function getShareLink(scene: Scene): string {
     const data = sceneToText(scene);
@@ -9,6 +11,7 @@ export function getShareLink(scene: Scene): string {
 }
 
 const PLAN_PREFIX = '#/plan/';
+const NOSTR_PREFIX = '#/nostr/';
 
 function getPlanData(hash: string, searchParams?: URLSearchParams): string | undefined {
     // Current share links are formatted as /#/plan/<data>
@@ -68,8 +71,8 @@ function getFetchScenePromise(url: string): Promise<Scene | undefined> {
 }
 
 /**
- * Reads a plan's scene data from the URL. If this requires fetching data from an external site, it suspends until the
- * data is fetched.
+ * Reads a plan's scene data from the URL. If this requires fetching data from
+ * an external site or Nostr relay, it suspends until the data is fetched.
  */
 export function useSceneFromUrl(): Scene | undefined {
     const [searchParams] = useSearchParams();
@@ -98,9 +101,45 @@ export function useSceneFromUrl(): Scene | undefined {
         return use(getFetchScenePromise(url));
     }
 
+    // Nostr share: #/nostr/<pubkey>/<dtag>
+    if (hash.startsWith(NOSTR_PREFIX)) {
+        const rest = hash.substring(NOSTR_PREFIX.length);
+        const slash = rest.indexOf('/');
+        if (slash > 0) {
+            const pubkey = decodeURIComponent(rest.substring(0, slash));
+            const dtag = decodeURIComponent(rest.substring(slash + 1));
+            if (pubkey && dtag) {
+                return use(getNostrFetchPromise(pubkey, dtag));
+            }
+        }
+    }
+
+    return undefined;
+}
+
+/**
+ * Returns a FileSource if the URL encodes a Nostr plan (i.e. #/nostr/<pubkey>/<dtag>).
+ * Purely synchronous — the pubkey and dtag are read directly from the hash.
+ * Used by App to initialise SceneProvider with the right source on URL loads.
+ */
+export function useSourceFromUrl(): FileSource | undefined {
+    const { hash } = useLocation();
+
+    if (hash.startsWith(NOSTR_PREFIX)) {
+        const rest = hash.substring(NOSTR_PREFIX.length);
+        const slash = rest.indexOf('/');
+        if (slash > 0) {
+            const pubkey = decodeURIComponent(rest.substring(0, slash));
+            const dtag = decodeURIComponent(rest.substring(slash + 1));
+            if (pubkey && dtag) {
+                return { type: 'nostr', name: dtag, pubkey, visibility: getNostrFetchedVisibility() };
+            }
+        }
+    }
+
     return undefined;
 }
 
 export function useSceneLoadError(): Error | string | unknown | undefined {
-    return sceneError;
+    return sceneError ?? getNostrFetchError();
 }

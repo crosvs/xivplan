@@ -5,6 +5,7 @@ import {
     MenuList,
     MenuPopover,
     MenuTrigger,
+    Spinner,
     Toolbar,
     ToolbarDivider,
     makeStyles,
@@ -13,11 +14,12 @@ import {
     ArrowDownloadRegular,
     ArrowRedoRegular,
     ArrowUndoRegular,
+    CloudArrowUpRegular,
     OpenRegular,
     SaveEditRegular,
     SaveRegular,
 } from '@fluentui/react-icons';
-import React, { ReactElement, useContext, useState } from 'react';
+import React, { ReactElement, useContext, useEffect, useRef, useState } from 'react';
 import { InPortal } from 'react-reverse-portal';
 import { CollapsableSplitButton, CollapsableToolbarButton } from './CollapsableToolbarButton';
 import { FileSource, useScene, useSceneUndoRedoPossible, useSetSource } from './SceneProvider';
@@ -28,6 +30,7 @@ import { saveFile } from './file';
 import { OpenDialog, SaveAsDialog } from './file/FileDialog';
 import { ShareDialogButton } from './file/ShareDialogButton';
 import { downloadScene, getBlobSource } from './file/blob';
+import { getNostrPubkey, publishPlan } from './file/nostr';
 import { DialogOpenContext } from './useCloseDialog';
 import { useCancelConnectionSelection } from './useEditMode';
 import { useHotkeys } from './useHotkeys';
@@ -102,19 +105,32 @@ export const MainToolbar: React.FC = () => {
 };
 
 interface SaveButtonState {
-    type: 'save' | 'saveas' | 'download';
+    type: 'save' | 'saveas' | 'nostr' | 'download';
     text: string;
     icon: ReactElement;
     disabled?: boolean;
 }
 
-function getSaveButtonState(source: FileSource | undefined, isDirty: boolean): SaveButtonState {
+function getSaveButtonState(
+    source: FileSource | undefined,
+    isDirty: boolean,
+    ownPubkey: string | undefined,
+): SaveButtonState {
     if (!source) {
         return { type: 'saveas', text: 'Save as', icon: <SaveEditRegular /> };
     }
 
     if (source.type === 'blob') {
         return { type: 'download', text: 'Download', icon: <ArrowDownloadRegular /> };
+    }
+
+    if (source.type === 'nostr') {
+        // Only allow re-publishing if this plan belongs to the user's own key.
+        // ownPubkey may still be loading (undefined) — disable until resolved.
+        if (!ownPubkey || source.pubkey !== ownPubkey) {
+            return { type: 'saveas', text: 'Save as', icon: <SaveEditRegular /> };
+        }
+        return { type: 'nostr', text: 'Publish', icon: <CloudArrowUpRegular />, disabled: !isDirty };
     }
 
     return { type: 'save', text: 'Save', icon: <SaveRegular />, disabled: !isDirty };
@@ -124,14 +140,33 @@ const SaveButton: React.FC = () => {
     const isDirty = useIsDirty();
     const setSavedState = useSetSavedState();
     const [saveAsOpen, setSaveAsOpen] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const savingRef = useRef(false);
     const { canonicalScene, source } = useScene();
     const setSource = useSetSource();
 
-    const { type, text, icon, disabled } = getSaveButtonState(source, isDirty);
+    // Load own pubkey from IDB to determine whether a nostr plan belongs to us.
+    const [ownPubkey, setOwnPubkey] = useState<string | undefined>();
+    useEffect(() => {
+        getNostrPubkey().then(setOwnPubkey);
+    }, []);
+
+    const { type, text, icon, disabled } = getSaveButtonState(source, isDirty, ownPubkey);
 
     const save = async () => {
+        if (savingRef.current) return;
         if (!source) {
             setSaveAsOpen(true);
+        } else if (source.type === 'nostr') {
+            savingRef.current = true;
+            setIsSaving(true);
+            try {
+                await publishPlan(canonicalScene, source.name, source.visibility ?? 'public');
+                setSavedState(canonicalScene);
+            } finally {
+                savingRef.current = false;
+                setIsSaving(false);
+            }
         } else if (isDirty) {
             await saveFile(canonicalScene, source);
             setSavedState(canonicalScene);
@@ -148,6 +183,7 @@ const SaveButton: React.FC = () => {
     const handleClick = () => {
         switch (type) {
             case 'save':
+            case 'nostr':
                 save();
                 break;
 
@@ -187,11 +223,11 @@ const SaveButton: React.FC = () => {
                     {(triggerProps: MenuButtonProps) => (
                         <CollapsableSplitButton
                             menuButton={triggerProps}
-                            primaryActionButton={{ onClick: handleClick, disabled }}
-                            icon={icon}
+                            primaryActionButton={{ onClick: handleClick, disabled: disabled || isSaving }}
+                            icon={isSaving ? <Spinner size="tiny" /> : icon}
                             appearance="subtle"
                         >
-                            {text}
+                            {isSaving ? 'Publishing…' : text}
                         </CollapsableSplitButton>
                     )}
                 </MenuTrigger>

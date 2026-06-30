@@ -185,7 +185,20 @@ export interface BlobFileSource {
     file?: File;
 }
 
-export type FileSource = LocalStorageFileSource | FileSystemFileSource | BlobFileSource;
+export interface NostrFileSource {
+    type: 'nostr';
+    /** The d-tag, shown as the plan's filename. */
+    name: string;
+    /** Hex public key of the event author. */
+    pubkey: string;
+    /**
+     * Undefined when the source was reconstructed from the URL without a full fetch.
+     * Always set after an explicit open/publish.
+     */
+    visibility?: 'public' | 'private';
+}
+
+export type FileSource = LocalStorageFileSource | FileSystemFileSource | BlobFileSource | NostrFileSource;
 
 export interface EditorState {
     scene: Scene;
@@ -211,10 +224,11 @@ const { UndoProvider, Context, usePresent, useUndoRedoPossible } = createUndoCon
 
 export interface SceneProviderProps extends PropsWithChildren {
     initialScene?: Scene;
+    initialSource?: FileSource;
 }
 
-export const SceneProvider: React.FC<SceneProviderProps> = ({ initialScene, children }) => {
-    const source = useState<FileSource | undefined>();
+export const SceneProvider: React.FC<SceneProviderProps> = ({ initialScene, initialSource, children }) => {
+    const source = useState<FileSource | undefined>(initialSource);
 
     const initialState: EditorState = {
         scene: initialScene ?? DEFAULT_SCENE,

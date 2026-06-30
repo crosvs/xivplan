@@ -3,7 +3,7 @@ import React, { PropsWithChildren, Suspense } from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { createBrowserRouter, createRoutesFromElements, Outlet, Route, RouterProvider } from 'react-router-dom';
 import { DirtyProvider } from './DirtyProvider';
-import { useSceneFromUrl } from './file/share';
+import { useSceneFromUrl, useSourceFromUrl } from './file/share';
 import { FileOpenPage } from './FileOpenPage';
 import { HelpProvider } from './HelpProvider';
 import { MainPage } from './MainPage';
@@ -50,11 +50,12 @@ const useStyles = makeStyles({
 
 const BaseProviders: React.FC<PropsWithChildren> = ({ children }) => {
     const sceneFromUrl = useSceneFromUrl();
+    const sourceFromUrl = useSourceFromUrl();
 
     return (
         <HotkeysProvider initiallyActiveScopes={[HotkeyScopes.Default, HotkeyScopes.AlwaysEnabled]}>
             <HelpProvider>
-                <SceneProvider initialScene={sceneFromUrl}>
+                <SceneProvider initialScene={sceneFromUrl} initialSource={sourceFromUrl}>
                     <DirtyProvider>{children}</DirtyProvider>
                 </SceneProvider>
             </HelpProvider>
