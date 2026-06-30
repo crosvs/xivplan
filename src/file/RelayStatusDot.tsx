@@ -54,12 +54,9 @@ const RelayTooltipContent: React.FC<{ relays: RelayInfo[] }> = ({ relays }) => {
     const classes = useStyles();
     return (
         <div className={classes.tooltipContent}>
-            {relays.map(relay => (
+            {relays.map((relay) => (
                 <div key={relay.url} className={classes.relayRow}>
-                    <span
-                        className={classes.relayDot}
-                        style={{ backgroundColor: STATUS_COLORS[relay.status] }}
-                    />
+                    <span className={classes.relayDot} style={{ backgroundColor: STATUS_COLORS[relay.status] }} />
                     <span className={classes.relayName}>{relay.url.replace('wss://', '')}</span>
                     <span style={{ color: tokens.colorNeutralForeground3, marginLeft: 'auto' }}>
                         {STATUS_LABELS[relay.status]}
@@ -85,16 +82,14 @@ export const RelayStatusDot: React.FC<RelayStatusDotProps> = ({ status, classNam
     }
 
     const color =
-        agg === 'connected' ? tokens.colorPaletteGreenBackground3
-        : agg === 'partial' ? tokens.colorPaletteYellowBackground3
-        : tokens.colorPaletteRedBackground3;
+        agg === 'connected'
+            ? tokens.colorPaletteGreenBackground3
+            : agg === 'partial'
+              ? tokens.colorPaletteYellowBackground3
+              : tokens.colorPaletteRedBackground3;
 
     return (
-        <Tooltip
-            content={<RelayTooltipContent relays={status.relays} />}
-            relationship="description"
-            withArrow
-        >
+        <Tooltip content={<RelayTooltipContent relays={status.relays} />} relationship="description" withArrow>
             <span
                 className={`${classes.dot} ${className ?? ''}`}
                 style={{ backgroundColor: color, ...style }}

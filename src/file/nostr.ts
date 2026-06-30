@@ -18,11 +18,7 @@ import { jsonToScene, sceneToJson } from '../file';
 import type { NostrFileSource } from '../SceneProvider';
 import type { Scene } from '../scene';
 
-export const NOSTR_RELAYS = [
-    'wss://relay.nostr.band',
-    'wss://nos.lol',
-    'wss://relay.damus.io',
-];
+export const NOSTR_RELAYS = ['wss://relay.nostr.band', 'wss://nos.lol', 'wss://relay.damus.io'];
 
 /** Kind for index events — metadata and pointer to the data event. */
 export const PLAN_KIND = 30078;
@@ -43,7 +39,7 @@ const _pool = new SimplePool();
 
 export type RelayHealth = 'checking' | 'connected' | 'error';
 
-const _health = new Map<string, RelayHealth>(NOSTR_RELAYS.map(url => [url, 'checking']));
+const _health = new Map<string, RelayHealth>(NOSTR_RELAYS.map((url) => [url, 'checking']));
 const _listeners = new Set<() => void>();
 
 function _setHealth(url: string, h: RelayHealth): void {
@@ -54,11 +50,13 @@ function _setHealth(url: string, h: RelayHealth): void {
 
 export function subscribeRelayStatus(fn: () => void): () => void {
     _listeners.add(fn);
-    return () => { _listeners.delete(fn); };
+    return () => {
+        _listeners.delete(fn);
+    };
 }
 
 export function getRelayStatus(): Array<{ url: string; status: RelayHealth }> {
-    return NOSTR_RELAYS.map(url => ({ url, status: _health.get(url) ?? 'checking' }));
+    return NOSTR_RELAYS.map((url) => ({ url, status: _health.get(url) ?? 'checking' }));
 }
 
 let _probing = false;
@@ -73,7 +71,7 @@ export async function probeRelays(): Promise<void> {
     const futureTs = Math.floor(now / 1000) + 365 * 24 * 3600;
     try {
         await Promise.allSettled(
-            NOSTR_RELAYS.map(async relay => {
+            NOSTR_RELAYS.map(async (relay) => {
                 try {
                     await _pool.get([relay], { kinds: [PLAN_KIND], since: futureTs }, { maxWait: 5000 });
                     _setHealth(relay, 'connected');
@@ -92,7 +90,7 @@ export async function probeRelays(): Promise<void> {
 const nostrStore = localforage.createInstance({ name: 'XIVPlan', storeName: 'nostr' });
 
 function bytesToHex(bytes: Uint8Array): string {
-    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -172,7 +170,7 @@ async function fanGet(
     relays: string[] = NOSTR_RELAYS,
 ): Promise<NostrEvent | null> {
     const results = await Promise.allSettled(
-        relays.map(async relay => {
+        relays.map(async (relay) => {
             try {
                 const event = await _pool.get([relay], filter, { maxWait: RELAY_TIMEOUT_MS });
                 _setHealth(relay, 'connected');
@@ -191,7 +189,7 @@ async function fanGet(
 
 async function fanQuery(filter: Parameters<SimplePool['querySync']>[1]): Promise<NostrEvent[]> {
     const results = await Promise.allSettled(
-        NOSTR_RELAYS.map(async relay => {
+        NOSTR_RELAYS.map(async (relay) => {
             try {
                 const events = await _pool.querySync([relay], filter, { maxWait: RELAY_TIMEOUT_MS });
                 _setHealth(relay, 'connected');
@@ -316,7 +314,7 @@ export async function publishPlan(
         }),
     );
 
-    const accepted = relayResults.filter(r => r.status === 'fulfilled').length;
+    const accepted = relayResults.filter((r) => r.status === 'fulfilled').length;
     if (accepted === 0) {
         throw new Error('Could not publish — no relays responded. Check your internet connection and try again.');
     }
@@ -338,7 +336,7 @@ export async function publishPlan(
     const existing = _vaultCache.get(pk);
     if (existing) {
         const newEntry: NostrPlanInfo = { dtag: name, publishedAt: new Date(now * 1000), visibility };
-        const filtered = existing.plans.filter(p => p.dtag !== name);
+        const filtered = existing.plans.filter((p) => p.dtag !== name);
         const merged = [newEntry, ...filtered].slice(0, VAULT_PAGE_SIZE);
         _vaultCache.set(pk, { plans: merged, hasMore: existing.hasMore, fetchedAt: Date.now() });
         _saveVaultCache();
@@ -364,13 +362,18 @@ export async function fetchPlan(pubkey: string, name: string): Promise<FetchPlan
     // Visibility from enc tag on data event (new format, added alongside the enc tag on the index).
     // Older plans lack enc on data — for those, NIP-44 ciphertext is not valid JSON, so sniff the
     // content to detect private plans without an extra index round-trip.
-    const encTag = dataEvent.tags.find(t => t[0] === 'enc')?.[1];
+    const encTag = dataEvent.tags.find((t) => t[0] === 'enc')?.[1];
     let visibility: 'public' | 'private';
     if (encTag !== undefined) {
         visibility = encTag === 'nip44-self' ? 'private' : 'public';
     } else {
         let looksLikeJson = false;
-        try { JSON.parse(dataEvent.content); looksLikeJson = true; } catch { /* encrypted */ }
+        try {
+            JSON.parse(dataEvent.content);
+            looksLikeJson = true;
+        } catch {
+            /* encrypted */
+        }
         visibility = looksLikeJson ? 'public' : 'private';
     }
 
@@ -385,7 +388,9 @@ export async function fetchPlan(pubkey: string, name: string): Promise<FetchPlan
         try {
             content = nip44.decrypt(content, convKey);
         } catch {
-            throw new Error('Failed to decrypt the plan — the stored key may be corrupted or the plan data is invalid.');
+            throw new Error(
+                'Failed to decrypt the plan — the stored key may be corrupted or the plan data is invalid.',
+            );
         }
     }
 
@@ -404,8 +409,8 @@ export async function deletePlan(dtag: string): Promise<void> {
             kind: 5,
             created_at: Math.floor(Date.now() / 1000),
             tags: [
-                ['a', `${PLAN_KIND}:${pk}:${dtag}`],       // index event
-                ['a', `${PLAN_DATA_KIND}:${pk}:${dtag}`],  // data event
+                ['a', `${PLAN_KIND}:${pk}:${dtag}`], // index event
+                ['a', `${PLAN_DATA_KIND}:${pk}:${dtag}`], // data event
             ],
             content: '',
         },
@@ -466,7 +471,7 @@ function _loadVaultCache(): Map<string, VaultCachePage> {
             Object.entries(stored).map(([pubkey, page]) => [
                 pubkey,
                 {
-                    plans: page.plans.map(p => ({
+                    plans: page.plans.map((p) => ({
                         dtag: p.dtag,
                         publishedAt: new Date(p.publishedAt),
                         visibility: p.visibility,
@@ -486,7 +491,7 @@ function _saveVaultCache(): void {
         const stored: Record<string, StoredVaultCachePage> = {};
         for (const [pubkey, page] of _vaultCache.entries()) {
             stored[pubkey] = {
-                plans: page.plans.map(p => ({
+                plans: page.plans.map((p) => ({
                     dtag: p.dtag,
                     publishedAt: p.publishedAt.getTime(),
                     visibility: p.visibility,
@@ -539,7 +544,7 @@ export async function listPlans(
         ...(opts.dtag && { '#d': [opts.dtag] }),
     });
 
-    const result = buildPage(events, fetchLimit);
+    const result = buildPage(events);
 
     if (isFirstPage) {
         _vaultCache.set(pubkey, { ...result, fetchedAt: Date.now() });
@@ -556,17 +561,17 @@ export async function listOwnPlans(
     return listPlans(await getNostrPubkey(), opts);
 }
 
-function buildPage(events: NostrEvent[], fetchLimit: number): { plans: NostrPlanInfo[]; hasMore: boolean } {
+function buildPage(events: NostrEvent[]): { plans: NostrPlanInfo[]; hasMore: boolean } {
     events.sort((a, b) => b.created_at - a.created_at);
     const hasMore = events.length > VAULT_PAGE_SIZE;
     const page = events.slice(0, VAULT_PAGE_SIZE);
     const plans = page
-        .map(e => ({
-            dtag: e.tags.find(t => t[0] === 'd')?.[1] ?? '',
+        .map((e) => ({
+            dtag: e.tags.find((t) => t[0] === 'd')?.[1] ?? '',
             publishedAt: new Date(e.created_at * 1000),
-            visibility: (e.tags.some(t => t[0] === 'enc') ? 'private' : 'public') as 'public' | 'private',
+            visibility: (e.tags.some((t) => t[0] === 'enc') ? 'private' : 'public') as 'public' | 'private',
         }))
-        .filter(p => p.dtag);
+        .filter((p) => p.dtag);
     return { plans, hasMore };
 }
 
@@ -585,11 +590,11 @@ export function getNostrFetchPromise(pubkey: string, dtag: string): Promise<Scen
     _cachedError = undefined;
     _cachedVisibility = undefined;
     _cachedPromise = fetchPlan(pubkey, dtag)
-        .then(result => {
+        .then((result) => {
             _cachedVisibility = result.visibility;
             return result.scene;
         })
-        .catch(ex => {
+        .catch((ex) => {
             console.error('Failed to fetch Nostr plan', ex);
             _cachedError = ex;
             return undefined;

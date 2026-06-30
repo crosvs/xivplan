@@ -42,6 +42,9 @@ async function openFileUnvalidated(source: FileSource) {
                 throw new Error('File not set');
             }
             return await openFileBlob(source.file);
+
+        case 'nostr':
+            throw new Error('Nostr plans must be opened via fetchPlan');
     }
 }
 

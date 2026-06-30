@@ -1,5 +1,4 @@
 import {
-    Badge,
     Button,
     Dialog,
     DialogActions,
@@ -33,7 +32,20 @@ import {
     tokens,
     useToastController,
 } from '@fluentui/react-components';
-import { ArrowClockwiseRegular, ArrowCounterclockwiseRegular, ArrowDownloadRegular, ArrowUploadRegular, CopyRegular, DeleteFilled, DeleteRegular, DocumentCopyRegular, KeyRegular, LockClosedRegular, ShareRegular, bundleIcon } from '@fluentui/react-icons';
+import {
+    ArrowClockwiseRegular,
+    ArrowCounterclockwiseRegular,
+    ArrowDownloadRegular,
+    ArrowUploadRegular,
+    CopyRegular,
+    DeleteFilled,
+    DeleteRegular,
+    DocumentCopyRegular,
+    KeyRegular,
+    LockClosedRegular,
+    ShareRegular,
+    bundleIcon,
+} from '@fluentui/react-icons';
 import React, { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
 import { useAsync, useAsyncFn } from 'react-use';
@@ -240,7 +252,10 @@ export const KeySection: React.FC = () => {
                 <Button
                     size="small"
                     icon={<ArrowCounterclockwiseRegular />}
-                    onClick={() => { setKeySaved(false); setShowNewKeyConfirm(true); }}
+                    onClick={() => {
+                        setKeySaved(false);
+                        setShowNewKeyConfirm(true);
+                    }}
                 >
                     New key
                 </Button>
@@ -249,7 +264,7 @@ export const KeySection: React.FC = () => {
                     type="file"
                     accept=".txt"
                     style={{ display: 'none' }}
-                    onChange={e => e.target.files?.[0] && handleImportFile(e.target.files[0])}
+                    onChange={(e) => e.target.files?.[0] && handleImportFile(e.target.files[0])}
                 />
             </div>
             {importError && (
@@ -258,8 +273,8 @@ export const KeySection: React.FC = () => {
                 </MessageBar>
             )}
             <p className={classes.hint}>
-                Your key signs plans you publish. Save it to back up or transfer to another device. Anyone with your
-                key can publish plans under your identity — keep it private.
+                Your key signs plans you publish. Save it to back up or transfer to another device. Anyone with your key
+                can publish plans under your identity — keep it private.
             </p>
 
             <Dialog open={showNewKeyConfirm} onOpenChange={(_, d) => setShowNewKeyConfirm(d.open)}>
@@ -398,7 +413,7 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
 
                     {vaultPlans.length > 0 && (
                         <div className={classes.overwriteList}>
-                            {vaultPlans.map(item => (
+                            {vaultPlans.map((item) => (
                                 <button
                                     key={item.dtag}
                                     className={`${classes.overwriteRow} ${item.dtag === name ? classes.overwriteRowSelected : ''}`}
@@ -406,7 +421,9 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
                                     type="button"
                                 >
                                     {item.visibility === 'private' && (
-                                        <LockClosedRegular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
+                                        <LockClosedRegular
+                                            style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}
+                                        />
                                     )}
                                     <span className={classes.overwriteRowName}>{item.dtag}</span>
                                     <span className={classes.overwriteRowDate}>
@@ -443,9 +460,7 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
                     </RadioGroup>
                 </Field>
                 {visibility === 'private' && (
-                    <p className={classes.hint}>
-                        Content is encrypted — only you (with your key) can open this plan.
-                    </p>
+                    <p className={classes.hint}>Content is encrypted — only you (with your key) can open this plan.</p>
                 )}
                 {!publishedUrl && (
                     <p className={classes.hint}>
@@ -545,23 +560,21 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
     const [vaultCached, setVaultCached] = useState(false);
     const [selectedVaultRow, setSelectedVaultRow] = useState<TableRowId | undefined>();
     const [isVaultStale, setIsVaultStale] = useState(false);
-    const selectedPlan = vaultPlans.find(p => p.dtag === selectedVaultRow);
+    const selectedPlan = vaultPlans.find((p) => p.dtag === selectedVaultRow);
     const selectedIsLocked = selectedPlan !== undefined && selectedPlan.visibility === 'private' && !isOwnVault;
 
-    const [vaultState, loadVault] = useAsyncFn(
-        async (pubkey: string, until?: number, bust = false) => {
-            if (bust) invalidateVaultCache(pubkey);
-            const { plans, hasMore, cached, stale } = await listPlans(pubkey, { until });
-            setVaultPlans(prev => (until === undefined ? plans : [...prev, ...plans]));
-            setVaultHasMore(hasMore);
-            setVaultCached(cached);
-            setIsVaultStale(stale && until === undefined);
-            if (plans.length) {
-                setVaultUntil(Math.floor(plans[plans.length - 1].publishedAt.getTime() / 1000) - 1);
-            }
-        },
-        [],
-    );
+    const [vaultState, loadVault] = useAsyncFn(async (pubkey: string, until?: number, bust = false) => {
+        if (bust) invalidateVaultCache(pubkey);
+        const { plans, hasMore, cached, stale } = await listPlans(pubkey, { until });
+        setVaultPlans((prev) => (until === undefined ? plans : [...prev, ...plans]));
+        setVaultHasMore(hasMore);
+        setVaultCached(cached);
+        setIsVaultStale(stale && until === undefined);
+        const lastPlan = plans.at(-1);
+        if (lastPlan) {
+            setVaultUntil(Math.floor(lastPlan.publishedAt.getTime() / 1000) - 1);
+        }
+    }, []);
 
     // Reload vault when the active pubkey changes
     const prevPubkeyRef = useRef<string | null>(null);
@@ -582,8 +595,8 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
         if (!isVaultStale || !currentPubkey) return;
         invalidateVaultCache(currentPubkey);
         loadVault(currentPubkey);
-    // loadVault is stable (useAsyncFn with [] deps); currentPubkey changes reset isVaultStale first.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // loadVault is stable (useAsyncFn with [] deps); currentPubkey changes reset isVaultStale first.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isVaultStale, currentPubkey]);
 
     // Duplicate dialog state
@@ -616,7 +629,7 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
     const handleDelete = useCallback(
         async (dtag: string) => {
             await deletePlan(dtag);
-            setVaultPlans(prev => prev.filter(p => p.dtag !== dtag));
+            setVaultPlans((prev) => prev.filter((p) => p.dtag !== dtag));
             if (selectedVaultRow === dtag) setSelectedVaultRow(undefined);
         },
         [selectedVaultRow],
@@ -626,7 +639,12 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
         async (item: NostrPlanInfo) => {
             if (!currentPubkey) return;
             await navigator.clipboard.writeText(getNostrShareUrl(currentPubkey, item.dtag));
-            dispatchToast(<Toast><ToastTitle>Link copied</ToastTitle></Toast>, { intent: 'success' });
+            dispatchToast(
+                <Toast>
+                    <ToastTitle>Link copied</ToastTitle>
+                </Toast>,
+                { intent: 'success' },
+            );
         },
         [currentPubkey, dispatchToast],
     );
@@ -635,7 +653,7 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
         createTableColumn<NostrPlanInfo>({
             columnId: 'name',
             renderHeaderCell: () => 'Plan name',
-            renderCell: item => (
+            renderCell: (item) => (
                 <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
                     {item.visibility === 'private' && (
                         <Tooltip content="Private — encrypted" relationship="label" withArrow>
@@ -649,19 +667,22 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
         createTableColumn<NostrPlanInfo>({
             columnId: 'date',
             renderHeaderCell: () => 'Published',
-            renderCell: item => item.publishedAt.toLocaleString(),
+            renderCell: (item) => item.publishedAt.toLocaleString(),
         }),
         createTableColumn<NostrPlanInfo>({
             columnId: 'actions',
             renderHeaderCell: () => 'Actions',
-            renderCell: item => (
+            renderCell: (item) => (
                 <div style={{ display: 'flex' }}>
                     <Tooltip content="Share link" appearance="inverted" relationship="label" withArrow>
                         <Button
                             appearance="subtle"
                             aria-label="Share link"
                             icon={<ShareRegular />}
-                            onClick={e => { e.stopPropagation(); handleCopyLink(item); }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleCopyLink(item);
+                            }}
                         />
                     </Tooltip>
                     <Tooltip content="Duplicate as…" appearance="inverted" relationship="label" withArrow>
@@ -670,7 +691,7 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                             aria-label="Duplicate"
                             icon={<DocumentCopyRegular />}
                             disabled={isVaultStale}
-                            onClick={e => {
+                            onClick={(e) => {
                                 e.stopPropagation();
                                 setDuplicateName(`${item.dtag}-copy`);
                                 setDuplicateSource(item);
@@ -684,7 +705,10 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                                 aria-label="Delete"
                                 icon={<DeleteIcon />}
                                 disabled={isVaultStale}
-                                onClick={e => { e.stopPropagation(); handleDelete(item.dtag); }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(item.dtag);
+                                }}
                             />
                         </Tooltip>
                     )}
@@ -735,10 +759,14 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                     <div className={classes.vaultError}>
                         <MessageBar intent="error">
                             <MessageBarBody>
-                                {vaultState.error instanceof Error ? vaultState.error.message : String(vaultState.error)}
+                                {vaultState.error instanceof Error
+                                    ? vaultState.error.message
+                                    : String(vaultState.error)}
                             </MessageBarBody>
                         </MessageBar>
-                        <Button size="small" onClick={() => currentPubkey && loadVault(currentPubkey)}>Retry</Button>
+                        <Button size="small" onClick={() => currentPubkey && loadVault(currentPubkey)}>
+                            Retry
+                        </Button>
                     </div>
                 ) : vaultPlans.length > 0 ? (
                     <>
@@ -763,7 +791,9 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                                 {({ item, rowId }) => (
                                     <DataGridRow<NostrPlanInfo>
                                         key={rowId}
-                                        className={item.visibility === 'private' && !isOwnVault ? classes.lockedRow : undefined}
+                                        className={
+                                            item.visibility === 'private' && !isOwnVault ? classes.lockedRow : undefined
+                                        }
                                         selectionCell={{ radioIndicator: { 'aria-label': 'Select plan' } }}
                                         onDoubleClick={() => currentPubkey && openPlan(currentPubkey, item.dtag)}
                                     >
@@ -779,7 +809,9 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                         {vaultState.error && (
                             <MessageBar intent="error">
                                 <MessageBarBody>
-                                    {vaultState.error instanceof Error ? vaultState.error.message : String(vaultState.error)}
+                                    {vaultState.error instanceof Error
+                                        ? vaultState.error.message
+                                        : String(vaultState.error)}
                                 </MessageBarBody>
                             </MessageBar>
                         )}
@@ -810,7 +842,12 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
             )}
 
             {/* Duplicate dialog */}
-            <Dialog open={!!duplicateSource} onOpenChange={(_, d) => { if (!d.open) setDuplicateSource(null); }}>
+            <Dialog
+                open={!!duplicateSource}
+                onOpenChange={(_, d) => {
+                    if (!d.open) setDuplicateSource(null);
+                }}
+            >
                 <DialogSurface>
                     <DialogTitle>Duplicate plan</DialogTitle>
                     <DialogContent>
@@ -823,7 +860,7 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                                 value={duplicateName}
                                 onChange={(_, d) => setDuplicateName(d.value)}
                                 placeholder="e.g. p1-copy"
-                                onKeyUp={e => e.key === 'Enter' && duplicateName.trim() && startDuplicate()}
+                                onKeyUp={(e) => e.key === 'Enter' && duplicateName.trim() && startDuplicate()}
                             />
                         </Field>
                         {duplicateState.error && (
@@ -854,7 +891,9 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                 <DialogActions fluid className={classes.actions}>
                     <Button
                         appearance="primary"
-                        disabled={selectedVaultRow === undefined || openState.loading || !currentPubkey || selectedIsLocked}
+                        disabled={
+                            selectedVaultRow === undefined || openState.loading || !currentPubkey || selectedIsLocked
+                        }
                         icon={openState.loading ? <Spinner size="tiny" /> : undefined}
                         onClick={() => {
                             if (selectedVaultRow !== undefined && currentPubkey) {

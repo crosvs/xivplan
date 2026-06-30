@@ -154,15 +154,12 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
     const ownPubkeyState = useAsync(getNostrPubkey);
 
     const [name, setName] = useState(isNostr ? source.name : '');
-    const [visibility, setVisibility] = useState<'public' | 'private'>(
-        () => (isNostr && source.visibility === 'private' ? 'private' : 'public'),
+    const [visibility, setVisibility] = useState<'public' | 'private'>(() =>
+        isNostr && source.visibility === 'private' ? 'private' : 'public',
     );
     const [publishedUrl, setPublishedUrl] = useState<string>('');
 
-    const isOwnPlan =
-        isNostr &&
-        ownPubkeyState.value !== undefined &&
-        ownPubkeyState.value === source.pubkey;
+    const isOwnPlan = isNostr && ownPubkeyState.value !== undefined && ownPubkeyState.value === source.pubkey;
 
     // Existing plan URL (before any publish in this session) or post-publish URL
     const shareUrl = publishedUrl || (isNostr ? getNostrShareUrl(source.pubkey, source.name) : '');
@@ -231,9 +228,7 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
                 </RadioGroup>
             </Field>
             {visibility === 'private' && (
-                <p className={classes.hint}>
-                    Content is encrypted — only you (with your key) can open this plan.
-                </p>
+                <p className={classes.hint}>Content is encrypted — only you (with your key) can open this plan.</p>
             )}
             {isOwnPlan && !publishedUrl && (
                 <p className={classes.hint}>
@@ -258,11 +253,7 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
             <InPortal node={actions}>
                 <DialogActions fluid>
                     {shareUrl && (
-                        <Button
-                            icon={<CopyRegular />}
-                            onClick={copyUrl}
-                            style={{ marginRight: 'auto' }}
-                        >
+                        <Button icon={<CopyRegular />} onClick={copyUrl} style={{ marginRight: 'auto' }}>
                             Copy link
                         </Button>
                     )}
@@ -273,11 +264,7 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
                         icon={publishState.loading ? <Spinner size="tiny" /> : undefined}
                         onClick={publish}
                     >
-                        {publishState.loading
-                            ? 'Publishing…'
-                            : isOwnPlan
-                              ? 'Update plan'
-                              : 'Publish to Nostr'}
+                        {publishState.loading ? 'Publishing…' : isOwnPlan ? 'Update plan' : 'Publish to Nostr'}
                     </Button>
                     <DialogTrigger disableButtonEnhancement>
                         <Button>Close</Button>

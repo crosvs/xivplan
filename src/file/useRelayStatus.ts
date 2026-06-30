@@ -16,12 +16,10 @@ export interface RelayStatusResult {
     anyConnected: boolean;
 }
 
-export function aggregateRelayStatus(
-    result: RelayStatusResult,
-): 'checking' | 'connected' | 'partial' | 'offline' {
+export function aggregateRelayStatus(result: RelayStatusResult): 'checking' | 'connected' | 'partial' | 'offline' {
     if (!result.allChecked) return 'checking';
     if (!result.anyConnected) return 'offline';
-    return result.relays.some(r => r.status === 'error') ? 'partial' : 'connected';
+    return result.relays.some((r) => r.status === 'error') ? 'partial' : 'connected';
 }
 
 /**
@@ -33,13 +31,12 @@ export function useRelayStatus(): RelayStatusResult {
     const [relays, setRelays] = useState<RelayInfo[]>(() => getRelayStatus());
 
     useEffect(() => {
-        setRelays(getRelayStatus());
         const unsub = subscribeRelayStatus(() => setRelays(getRelayStatus()));
         probeRelays(); // fire-and-forget; deduped in nostr.ts
         return unsub;
     }, []);
 
-    const allChecked = relays.every(r => r.status !== 'checking');
-    const anyConnected = relays.some(r => r.status === 'connected');
+    const allChecked = relays.every((r) => r.status !== 'checking');
+    const anyConnected = relays.some((r) => r.status === 'connected');
     return { relays, allChecked, anyConnected };
 }
