@@ -5,6 +5,7 @@ import {
     MenuList,
     MenuPopover,
     MenuTrigger,
+    Spinner,
     Toolbar,
     ToolbarDivider,
     makeStyles,
@@ -13,11 +14,12 @@ import {
     ArrowDownloadRegular,
     ArrowRedoRegular,
     ArrowUndoRegular,
+    CloudArrowUpRegular,
     OpenRegular,
     SaveEditRegular,
     SaveRegular,
 } from '@fluentui/react-icons';
-import React, { ReactElement, useContext, useEffect, useState } from 'react';
+import React, { ReactElement, useContext, useEffect, useRef, useState } from 'react';
 import { InPortal } from 'react-reverse-portal';
 import { CollapsableSplitButton, CollapsableToolbarButton } from './CollapsableToolbarButton';
 import { FileSource, useScene, useSceneUndoRedoPossible, useSetSource } from './SceneProvider';
@@ -128,7 +130,7 @@ function getSaveButtonState(
         if (!ownPubkey || source.pubkey !== ownPubkey) {
             return { type: 'saveas', text: 'Save as', icon: <SaveEditRegular /> };
         }
-        return { type: 'nostr', text: 'Save', icon: <SaveRegular />, disabled: !isDirty };
+        return { type: 'nostr', text: 'Publish', icon: <CloudArrowUpRegular />, disabled: !isDirty };
     }
 
     return { type: 'save', text: 'Save', icon: <SaveRegular />, disabled: !isDirty };
@@ -138,6 +140,8 @@ const SaveButton: React.FC = () => {
     const isDirty = useIsDirty();
     const setSavedState = useSetSavedState();
     const [saveAsOpen, setSaveAsOpen] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const savingRef = useRef(false);
     const { canonicalScene, source } = useScene();
     const setSource = useSetSource();
 
@@ -150,11 +154,19 @@ const SaveButton: React.FC = () => {
     const { type, text, icon, disabled } = getSaveButtonState(source, isDirty, ownPubkey);
 
     const save = async () => {
+        if (savingRef.current) return;
         if (!source) {
             setSaveAsOpen(true);
         } else if (source.type === 'nostr') {
-            await publishPlan(canonicalScene, source.name);
-            setSavedState(canonicalScene);
+            savingRef.current = true;
+            setIsSaving(true);
+            try {
+                await publishPlan(canonicalScene, source.name, source.visibility ?? 'public');
+                setSavedState(canonicalScene);
+            } finally {
+                savingRef.current = false;
+                setIsSaving(false);
+            }
         } else if (isDirty) {
             await saveFile(canonicalScene, source);
             setSavedState(canonicalScene);
@@ -211,11 +223,11 @@ const SaveButton: React.FC = () => {
                     {(triggerProps: MenuButtonProps) => (
                         <CollapsableSplitButton
                             menuButton={triggerProps}
-                            primaryActionButton={{ onClick: handleClick, disabled }}
-                            icon={icon}
+                            primaryActionButton={{ onClick: handleClick, disabled: disabled || isSaving }}
+                            icon={isSaving ? <Spinner size="tiny" /> : icon}
                             appearance="subtle"
                         >
-                            {text}
+                            {isSaving ? 'Publishing…' : text}
                         </CollapsableSplitButton>
                     )}
                 </MenuTrigger>

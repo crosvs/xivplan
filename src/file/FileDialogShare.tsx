@@ -50,8 +50,8 @@ export const ImportFromString: React.FC<ImportFromStringProps> = ({ actions }) =
                 const rest = url.hash.slice(NOSTR_PREFIX.length);
                 const slash = rest.indexOf('/');
                 if (slash > 0) {
-                    const pubkey = rest.slice(0, slash);
-                    const dtag = rest.slice(slash + 1);
+                    const pubkey = decodeURIComponent(rest.slice(0, slash));
+                    const dtag = decodeURIComponent(rest.slice(slash + 1));
                     if (pubkey && dtag) {
                         setLoading(true);
                         setError(undefined);

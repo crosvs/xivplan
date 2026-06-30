@@ -10,6 +10,7 @@ export const SceneLoadErrorNotifier: React.FC = () => {
     useEffect(() => {
         if (sceneLoadError) {
             dispatchToast(<MessageToast title="Failed to load plan" message={sceneLoadError} />, {
+                toastId: 'scene-load-error',
                 intent: 'error',
                 timeout: -1,
             });

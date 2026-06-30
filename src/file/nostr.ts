@@ -257,15 +257,19 @@ export async function publishPlan(
         dataContent = planJson;
     }
 
-    // Data event (kind 30079) — full plan content
+    // Data event (kind 30079) — full plan content, self-describing visibility via enc tag
+    const dataTags: string[][] = [
+        ['d', name],
+        ['v', String(XIVPLAN_FORMAT_VERSION)],
+    ];
+    if (visibility === 'private') {
+        dataTags.push(['enc', 'nip44-self']);
+    }
     const dataEvent = finalizeEvent(
         {
             kind: PLAN_DATA_KIND,
             created_at: now,
-            tags: [
-                ['d', name],
-                ['v', String(XIVPLAN_FORMAT_VERSION)],
-            ],
+            tags: dataTags,
             content: dataContent,
         },
         sk,
@@ -314,24 +318,33 @@ export async function publishPlan(
 
     const accepted = relayResults.filter(r => r.status === 'fulfilled').length;
     if (accepted === 0) {
-        throw new Error('No relay accepted the event. Check your connection and try again.');
+        throw new Error('Could not publish — no relays responded. Check your internet connection and try again.');
     }
 
-    // Verify index on accepted relays only — no new WS connections to failed relays
-    const acceptedRelays = NOSTR_RELAYS.filter((_, i) => relayResults[i].status === 'fulfilled');
-    const stored = await fanGet({ kinds: [PLAN_KIND], authors: [pk], '#d': [name] }, acceptedRelays);
+    const stored = await fanGet({ kinds: [PLAN_KIND], authors: [pk], '#d': [name] });
 
     if (!stored) {
         throw new Error('Verification failed — the plan was not found on any relay after publishing.');
     }
     if (stored.id !== indexEvent.id) {
         throw new Error(
-            'A conflicting version was found on the relay — another session may have ' +
-                'published changes at the same time. Reload the plan and try again.',
+            'Another version was saved at the same time. ' +
+                'If you have multiple tabs open, close the others and try again.',
         );
     }
 
-    invalidateVaultCache(pk);
+    // Optimistically update the vault cache so the plan appears immediately in the list
+    // without needing a relay round-trip to re-fetch what we just published.
+    const existing = _vaultCache.get(pk);
+    if (existing) {
+        const newEntry: NostrPlanInfo = { dtag: name, publishedAt: new Date(now * 1000), visibility };
+        const filtered = existing.plans.filter(p => p.dtag !== name);
+        const merged = [newEntry, ...filtered].slice(0, VAULT_PAGE_SIZE);
+        _vaultCache.set(pk, { plans: merged, hasMore: existing.hasMore, fetchedAt: Date.now() });
+        _saveVaultCache();
+    } else {
+        invalidateVaultCache(pk);
+    }
     return { type: 'nostr', name, pubkey: pk, visibility };
 }
 
@@ -343,23 +356,25 @@ export interface FetchPlanResult {
 }
 
 export async function fetchPlan(pubkey: string, name: string): Promise<FetchPlanResult> {
-    // Step 1: index event (kind 30078) — tells us visibility and the data event ID
-    const indexEvent = await fanGet({ kinds: [PLAN_KIND], authors: [pubkey], '#d': [name] });
-    if (!indexEvent) throw new Error(`Plan "${name}" not found on any relay.`);
+    // Fetch data event directly by dtag — kind 30079 is a NIP-33 parameterized replaceable event,
+    // so the relay always returns the latest version. No index round-trip needed for new plans.
+    const dataEvent = await fanGet({ kinds: [PLAN_DATA_KIND], authors: [pubkey], '#d': [name] });
+    if (!dataEvent) throw new Error(`Plan "${name}" not found on any relay.`);
 
-    // Step 2: data event ID from the index's e tag
-    const dataEventId = indexEvent.tags.find(t => t[0] === 'e')?.[1];
-    if (!dataEventId) throw new Error(`Plan "${name}" index has no data reference — it may be corrupted.`);
+    // Visibility from enc tag on data event (new format, added alongside the enc tag on the index).
+    // Older plans lack enc on data — for those, NIP-44 ciphertext is not valid JSON, so sniff the
+    // content to detect private plans without an extra index round-trip.
+    const encTag = dataEvent.tags.find(t => t[0] === 'enc')?.[1];
+    let visibility: 'public' | 'private';
+    if (encTag !== undefined) {
+        visibility = encTag === 'nip44-self' ? 'private' : 'public';
+    } else {
+        let looksLikeJson = false;
+        try { JSON.parse(dataEvent.content); looksLikeJson = true; } catch { /* encrypted */ }
+        visibility = looksLikeJson ? 'public' : 'private';
+    }
 
-    // Step 3: data event (kind 30079) by ID
-    const dataEvent = await fanGet({ ids: [dataEventId] });
-    if (!dataEvent) throw new Error(`Plan data for "${name}" was not found on any relay.`);
-
-    // Step 4: decrypt if private
-    const encTag = indexEvent.tags.find(t => t[0] === 'enc')?.[1];
-    const visibility: 'public' | 'private' = encTag === 'nip44-self' ? 'private' : 'public';
     let content = dataEvent.content;
-
     if (visibility === 'private') {
         const sk = await getOrCreateSecretKey();
         const ownPk = getPublicKey(sk);
@@ -367,7 +382,11 @@ export async function fetchPlan(pubkey: string, name: string): Promise<FetchPlan
             throw new Error('This plan is private and can only be opened with the key that published it.');
         }
         const convKey = nip44.getConversationKey(sk, ownPk);
-        content = nip44.decrypt(content, convKey);
+        try {
+            content = nip44.decrypt(content, convKey);
+        } catch {
+            throw new Error('Failed to decrypt the plan — the stored key may be corrupted or the plan data is invalid.');
+        }
     }
 
     return { scene: jsonToScene(content), visibility };
@@ -429,13 +448,66 @@ interface VaultCachePage {
     fetchedAt: number;
 }
 
-const _vaultCache = new Map<string, VaultCachePage>();
 const VAULT_CACHE_TTL = 5 * 60 * 1000;
+const VAULT_CACHE_STORAGE_KEY = 'xivplan:vault-cache';
+
+interface StoredVaultCachePage {
+    plans: Array<{ dtag: string; publishedAt: number; visibility: 'public' | 'private' }>;
+    hasMore: boolean;
+    fetchedAt: number;
+}
+
+function _loadVaultCache(): Map<string, VaultCachePage> {
+    try {
+        const raw = localStorage.getItem(VAULT_CACHE_STORAGE_KEY);
+        if (!raw) return new Map();
+        const stored = JSON.parse(raw) as Record<string, StoredVaultCachePage>;
+        return new Map(
+            Object.entries(stored).map(([pubkey, page]) => [
+                pubkey,
+                {
+                    plans: page.plans.map(p => ({
+                        dtag: p.dtag,
+                        publishedAt: new Date(p.publishedAt),
+                        visibility: p.visibility,
+                    })),
+                    hasMore: page.hasMore,
+                    fetchedAt: page.fetchedAt,
+                },
+            ]),
+        );
+    } catch {
+        return new Map();
+    }
+}
+
+function _saveVaultCache(): void {
+    try {
+        const stored: Record<string, StoredVaultCachePage> = {};
+        for (const [pubkey, page] of _vaultCache.entries()) {
+            stored[pubkey] = {
+                plans: page.plans.map(p => ({
+                    dtag: p.dtag,
+                    publishedAt: p.publishedAt.getTime(),
+                    visibility: p.visibility,
+                })),
+                hasMore: page.hasMore,
+                fetchedAt: page.fetchedAt,
+            };
+        }
+        localStorage.setItem(VAULT_CACHE_STORAGE_KEY, JSON.stringify(stored));
+    } catch {
+        // Ignore storage errors (private browsing, quota exceeded)
+    }
+}
+
+const _vaultCache = _loadVaultCache();
 
 /** Evict cached vault page(s). Call after publish or delete to force a fresh fetch. */
 export function invalidateVaultCache(pubkey?: string): void {
     if (pubkey) _vaultCache.delete(pubkey);
     else _vaultCache.clear();
+    _saveVaultCache();
 }
 
 /**
@@ -447,13 +519,14 @@ export function invalidateVaultCache(pubkey?: string): void {
 export async function listPlans(
     pubkey: string,
     opts: { until?: number; dtag?: string } = {},
-): Promise<{ plans: NostrPlanInfo[]; hasMore: boolean; cached: boolean }> {
+): Promise<{ plans: NostrPlanInfo[]; hasMore: boolean; cached: boolean; stale: boolean }> {
     const isFirstPage = opts.until === undefined && !opts.dtag;
 
     if (isFirstPage) {
         const cached = _vaultCache.get(pubkey);
-        if (cached && Date.now() - cached.fetchedAt < VAULT_CACHE_TTL) {
-            return { plans: cached.plans, hasMore: cached.hasMore, cached: true };
+        if (cached) {
+            const withinTTL = Date.now() - cached.fetchedAt < VAULT_CACHE_TTL;
+            return { plans: cached.plans, hasMore: cached.hasMore, cached: true, stale: !withinTTL };
         }
     }
 
@@ -470,9 +543,10 @@ export async function listPlans(
 
     if (isFirstPage) {
         _vaultCache.set(pubkey, { ...result, fetchedAt: Date.now() });
+        _saveVaultCache();
     }
 
-    return { ...result, cached: false };
+    return { ...result, cached: false, stale: false };
 }
 
 /** Convenience wrapper — lists the current user's own plans. */
@@ -504,7 +578,7 @@ let _cachedVisibility: 'public' | 'private' | undefined;
 let _cachedError: unknown;
 
 export function getNostrFetchPromise(pubkey: string, dtag: string): Promise<Scene | undefined> {
-    const key = `${pubkey}:${dtag}`;
+    const key = `${pubkey}|${dtag}`;
     if (key === _cacheKey && _cachedPromise) return _cachedPromise;
 
     _cacheKey = key;

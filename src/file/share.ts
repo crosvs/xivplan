@@ -3,7 +3,7 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import { jsonToScene, sceneToText, textToScene } from '../file';
 import type { FileSource } from '../SceneProvider';
 import { Scene } from '../scene';
-import { getNostrFetchError, getNostrFetchPromise } from './nostr';
+import { getNostrFetchError, getNostrFetchedVisibility, getNostrFetchPromise } from './nostr';
 
 export function getShareLink(scene: Scene): string {
     const data = sceneToText(scene);
@@ -106,9 +106,11 @@ export function useSceneFromUrl(): Scene | undefined {
         const rest = hash.substring(NOSTR_PREFIX.length);
         const slash = rest.indexOf('/');
         if (slash > 0) {
-            const pubkey = rest.substring(0, slash);
-            const dtag = rest.substring(slash + 1);
-            return use(getNostrFetchPromise(pubkey, dtag));
+            const pubkey = decodeURIComponent(rest.substring(0, slash));
+            const dtag = decodeURIComponent(rest.substring(slash + 1));
+            if (pubkey && dtag) {
+                return use(getNostrFetchPromise(pubkey, dtag));
+            }
         }
     }
 
@@ -127,9 +129,11 @@ export function useSourceFromUrl(): FileSource | undefined {
         const rest = hash.substring(NOSTR_PREFIX.length);
         const slash = rest.indexOf('/');
         if (slash > 0) {
-            const pubkey = rest.substring(0, slash);
-            const dtag = rest.substring(slash + 1);
-            return { type: 'nostr', name: dtag, pubkey };
+            const pubkey = decodeURIComponent(rest.substring(0, slash));
+            const dtag = decodeURIComponent(rest.substring(slash + 1));
+            if (pubkey && dtag) {
+                return { type: 'nostr', name: dtag, pubkey, visibility: getNostrFetchedVisibility() };
+            }
         }
     }
 

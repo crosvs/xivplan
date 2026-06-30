@@ -22,7 +22,7 @@ import {
     tokens,
     useToastController,
 } from '@fluentui/react-components';
-import { CopyRegular, LockClosedRegular, ShareRegular } from '@fluentui/react-icons';
+import { CopyRegular, ShareRegular } from '@fluentui/react-icons';
 import React, { KeyboardEvent, ReactNode, useState } from 'react';
 import { HtmlPortalNode, InPortal, OutPortal, createHtmlPortalNode } from 'react-reverse-portal';
 import { useAsync, useAsyncFn } from 'react-use';
@@ -159,25 +159,14 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
     );
     const [publishedUrl, setPublishedUrl] = useState<string>('');
 
-    // Short-circuit when: own plan, content unchanged, visibility unchanged, and visibility is known.
-    const isOwnUnchanged =
+    const isOwnPlan =
         isNostr &&
-        !isDirty &&
-        source.visibility !== undefined &&
         ownPubkeyState.value !== undefined &&
-        ownPubkeyState.value === source.pubkey &&
-        visibility === source.visibility;
+        ownPubkeyState.value === source.pubkey;
 
+    // Existing plan URL (before any publish in this session) or post-publish URL
     const shareUrl = publishedUrl || (isNostr ? getNostrShareUrl(source.pubkey, source.name) : '');
-    const showResult = isOwnUnchanged || !!publishedUrl;
     const canPublish = !!name.trim() && relayStatus.anyConnected;
-
-    // Resolve the active visibility from source or from the last publish
-    const activeVisibility: 'public' | 'private' | undefined = publishedUrl
-        ? visibility
-        : isNostr
-          ? source.visibility
-          : undefined;
 
     const [publishState, publish] = useAsyncFn(async () => {
         const nostrSource = await publishPlan(scene, name.trim(), visibility);
@@ -204,106 +193,96 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
         <>
             <KeySection />
 
-            {/* Publish form — hidden after successful publish or for own unchanged plan */}
-            {!showResult && (
-                <>
-                    {isDirty && (
-                        <MessageBar intent="warning" className={classes.dirtyWarning}>
-                            <MessageBarBody>
-                                {isNostr
-                                    ? 'You have unsaved changes since the last publish.'
-                                    : 'You have unsaved changes. They will be included in the published plan.'}
-                            </MessageBarBody>
-                        </MessageBar>
-                    )}
-                    <Field label="Plan name">
-                        <Input
-                            value={name}
-                            placeholder="e.g. p1-progression-week1"
-                            onChange={(_, d) => setName(d.value)}
-                            onKeyUp={onKeyUp}
-                            disabled={publishState.loading}
-                            autoFocus={!isNostr}
-                        />
-                    </Field>
-                    <Field label="Visibility">
-                        <RadioGroup
-                            value={visibility}
-                            onChange={(_, d) => setVisibility(d.value as 'public' | 'private')}
-                            layout="horizontal"
-                            disabled={publishState.loading}
-                        >
-                            <Radio value="public" label="Public" />
-                            <Radio value="private" label="Private" />
-                        </RadioGroup>
-                    </Field>
-                    {visibility === 'private' && (
-                        <p className={classes.hint}>
-                            Content is encrypted — only you (with your key) can open this plan.
-                        </p>
-                    )}
-                    {isNostr && (
-                        <p className={classes.hint}>
-                            Publishing with the same name overwrites the previous version — the share URL stays the same.
-                        </p>
-                    )}
-                    {publishState.error && (
-                        <MessageBar intent="error">
-                            <MessageBarBody>{String(publishState.error)}</MessageBarBody>
-                        </MessageBar>
-                    )}
-                </>
+            {isDirty && (
+                <MessageBar intent="warning" className={classes.dirtyWarning}>
+                    <MessageBarBody>
+                        {isNostr
+                            ? 'You have unsaved changes since the last publish.'
+                            : 'You have unsaved changes. They will be included in the published plan.'}
+                    </MessageBarBody>
+                </MessageBar>
             )}
 
-            {/* Result — shown immediately for own unchanged plan, or after publishing */}
-            {showResult && (
-                <>
-                    {publishedUrl && (
-                        <MessageBar intent="success" className={classes.dirtyWarning}>
-                            <MessageBarBody>Published to Nostr.</MessageBarBody>
-                        </MessageBar>
-                    )}
-                    {activeVisibility === 'private' && (
-                        <MessageBar intent="info" className={classes.dirtyWarning}>
-                            <MessageBarBody>
-                                <LockClosedRegular style={{ verticalAlign: 'middle', marginRight: tokens.spacingHorizontalXS }} />
-                                Private — encrypted. Only openable with your key.
-                            </MessageBarBody>
-                        </MessageBar>
-                    )}
-                    <Field label="Nostr link">
-                        <Textarea value={shareUrl} contentEditable={false} appearance="filled-darker" rows={3} />
-                    </Field>
-                    <RelayPublishList />
-                </>
+            {publishedUrl && (
+                <MessageBar intent="success" className={classes.dirtyWarning}>
+                    <MessageBarBody>Published to Nostr.</MessageBarBody>
+                </MessageBar>
+            )}
+
+            <Field label="Plan name">
+                <Input
+                    value={name}
+                    placeholder="e.g. p1-progression-week1"
+                    onChange={(_, d) => setName(d.value)}
+                    onKeyUp={onKeyUp}
+                    disabled={publishState.loading}
+                    autoFocus={!isNostr}
+                />
+            </Field>
+            <Field label="Visibility">
+                <RadioGroup
+                    value={visibility}
+                    onChange={(_, d) => setVisibility(d.value as 'public' | 'private')}
+                    layout="horizontal"
+                    disabled={publishState.loading}
+                >
+                    <Radio value="public" label="Public" />
+                    <Radio value="private" label="Private" />
+                </RadioGroup>
+            </Field>
+            {visibility === 'private' && (
+                <p className={classes.hint}>
+                    Content is encrypted — only you (with your key) can open this plan.
+                </p>
+            )}
+            {isOwnPlan && !publishedUrl && (
+                <p className={classes.hint}>
+                    Publishing with the same name overwrites the previous version — the share URL stays the same.
+                </p>
+            )}
+
+            {shareUrl && (
+                <Field label="Nostr link">
+                    <Textarea value={shareUrl} contentEditable={false} appearance="filled-darker" rows={3} />
+                </Field>
+            )}
+
+            {publishedUrl && <RelayPublishList />}
+
+            {publishState.error && (
+                <MessageBar intent="error" className={classes.dirtyWarning}>
+                    <MessageBarBody>{String(publishState.error)}</MessageBarBody>
+                </MessageBar>
             )}
 
             <InPortal node={actions}>
-                {showResult ? (
-                    <DialogActions>
-                            <Button icon={<CopyRegular />} onClick={copyUrl}>
-                            Copy share URL
-                        </Button>
-                        <DialogTrigger disableButtonEnhancement>
-                            <Button appearance="primary">Close</Button>
-                        </DialogTrigger>
-                    </DialogActions>
-                ) : (
-                    <DialogActions>
-                        <RelayStatusDot status={relayStatus} style={{ marginRight: tokens.spacingHorizontalXS }} />
+                <DialogActions fluid>
+                    {shareUrl && (
                         <Button
-                            appearance="primary"
-                            disabled={!canPublish || publishState.loading}
-                            icon={publishState.loading ? <Spinner size="tiny" /> : undefined}
-                            onClick={publish}
+                            icon={<CopyRegular />}
+                            onClick={copyUrl}
+                            style={{ marginRight: 'auto' }}
                         >
-                            {publishState.loading ? 'Publishing…' : isNostr ? 'Update plan' : 'Publish to Nostr'}
+                            Copy link
                         </Button>
-                        <DialogTrigger disableButtonEnhancement>
-                            <Button>Cancel</Button>
-                        </DialogTrigger>
-                    </DialogActions>
-                )}
+                    )}
+                    <RelayStatusDot status={relayStatus} style={{ marginRight: tokens.spacingHorizontalXS }} />
+                    <Button
+                        appearance="primary"
+                        disabled={!canPublish || publishState.loading}
+                        icon={publishState.loading ? <Spinner size="tiny" /> : undefined}
+                        onClick={publish}
+                    >
+                        {publishState.loading
+                            ? 'Publishing…'
+                            : isOwnPlan
+                              ? 'Update plan'
+                              : 'Publish to Nostr'}
+                    </Button>
+                    <DialogTrigger disableButtonEnhancement>
+                        <Button>Close</Button>
+                    </DialogTrigger>
+                </DialogActions>
             </InPortal>
         </>
     );
