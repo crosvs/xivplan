@@ -1,0 +1,533 @@
+/**
+ * Nostr plan storage — two-event architecture.
+ *
+ * Each plan is stored as a pair of NIP-78 parameterized replaceable events:
+ *   - Index (kind 30078): lightweight metadata + reference to the data event.
+ *     Vault queries only fetch this kind, keeping list operations fast.
+ *   - Data (kind 30079): full plan content (plaintext or NIP-44 encrypted).
+ *     Only fetched when opening a specific plan.
+ *
+ * Same pubkey + d-tag + kind = always the latest version (replaceable).
+ * Keys are stored in IDB (via localforage), never exposed beyond the browser.
+ */
+
+import localforage from 'localforage';
+import { finalizeEvent, generateSecretKey, getPublicKey, nip19, nip44, SimplePool } from 'nostr-tools';
+import type { NostrEvent } from 'nostr-tools';
+import { jsonToScene, sceneToJson } from '../file';
+import type { NostrFileSource } from '../SceneProvider';
+import type { Scene } from '../scene';
+
+export const NOSTR_RELAYS = [
+    'wss://relay.nostr.band',
+    'wss://nos.lol',
+    'wss://relay.damus.io',
+];
+
+/** Kind for index events — metadata and pointer to the data event. */
+export const PLAN_KIND = 30078;
+
+/** Kind for data events — full plan content. Separate kind keeps vault queries index-only. */
+export const PLAN_DATA_KIND = 30079;
+
+/** Incremented when the event structure changes in a backwards-incompatible way. */
+export const XIVPLAN_FORMAT_VERSION = 1;
+
+/** Per-relay timeout for read operations (ms). */
+const RELAY_TIMEOUT_MS = 6000;
+
+// Single long-lived pool — connections are reused across operations.
+const _pool = new SimplePool();
+
+// ── Shared relay status ───────────────────────────────────────────────────────
+
+export type RelayHealth = 'checking' | 'connected' | 'error';
+
+const _health = new Map<string, RelayHealth>(NOSTR_RELAYS.map(url => [url, 'checking']));
+const _listeners = new Set<() => void>();
+
+function _setHealth(url: string, h: RelayHealth): void {
+    if (_health.get(url) === h) return;
+    _health.set(url, h);
+    for (const fn of _listeners) fn();
+}
+
+export function subscribeRelayStatus(fn: () => void): () => void {
+    _listeners.add(fn);
+    return () => { _listeners.delete(fn); };
+}
+
+export function getRelayStatus(): Array<{ url: string; status: RelayHealth }> {
+    return NOSTR_RELAYS.map(url => ({ url, status: _health.get(url) ?? 'checking' }));
+}
+
+let _probing = false;
+let _lastProbeTime = 0;
+const PROBE_COOLDOWN_MS = 5 * 60 * 1000;
+
+export async function probeRelays(): Promise<void> {
+    const now = Date.now();
+    if (_probing || now - _lastProbeTime < PROBE_COOLDOWN_MS) return;
+    _probing = true;
+    _lastProbeTime = now;
+    const futureTs = Math.floor(now / 1000) + 365 * 24 * 3600;
+    try {
+        await Promise.allSettled(
+            NOSTR_RELAYS.map(async relay => {
+                try {
+                    await _pool.get([relay], { kinds: [PLAN_KIND], since: futureTs }, { maxWait: 5000 });
+                    _setHealth(relay, 'connected');
+                } catch {
+                    _setHealth(relay, 'error');
+                }
+            }),
+        );
+    } finally {
+        _probing = false;
+    }
+}
+
+// ── IDB storage ───────────────────────────────────────────────────────────────
+
+const nostrStore = localforage.createInstance({ name: 'XIVPlan', storeName: 'nostr' });
+
+function bytesToHex(bytes: Uint8Array): string {
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBytes(hex: string): Uint8Array {
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) {
+        out[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+    }
+    return out;
+}
+
+export async function getOrCreateSecretKey(): Promise<Uint8Array> {
+    const stored = await nostrStore.getItem<string>('sk');
+    if (stored) return hexToBytes(stored);
+    const sk = generateSecretKey();
+    await nostrStore.setItem('sk', bytesToHex(sk));
+    return sk;
+}
+
+export async function getNostrPubkey(): Promise<string> {
+    return getPublicKey(await getOrCreateSecretKey());
+}
+
+export async function hasStoredKey(): Promise<boolean> {
+    return (await nostrStore.getItem<string>('sk')) !== null;
+}
+
+/** Replaces the stored key with a freshly generated one. Irreversible — export first. */
+export async function generateNewKey(): Promise<void> {
+    const sk = generateSecretKey();
+    await nostrStore.setItem('sk', bytesToHex(sk));
+}
+
+/** Accepts a 64-char hex private key (contents of the exported .txt file). */
+export async function importSecretKey(text: string): Promise<void> {
+    const hex = text.trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(hex)) {
+        throw new Error('Invalid key: expected 64 hex characters.');
+    }
+    await nostrStore.setItem('sk', hex);
+}
+
+/** Returns a Blob containing the hex private key, suitable for saving as .txt. */
+export async function exportSecretKeyBlob(): Promise<Blob> {
+    const sk = await getOrCreateSecretKey();
+    return new Blob([bytesToHex(sk)], { type: 'text/plain' });
+}
+
+// ── Encoding helpers ──────────────────────────────────────────────────────────
+
+export function pubkeyToNpub(pubkey: string): string {
+    return nip19.npubEncode(pubkey);
+}
+
+export function parseInputPubkey(input: string): string {
+    input = input.trim();
+    if (input.startsWith('npub1')) {
+        try {
+            const decoded = nip19.decode(input);
+            if (decoded.type === 'npub') return decoded.data;
+        } catch {
+            // fall through to hex
+        }
+    }
+    return input;
+}
+
+// ── URL helpers ───────────────────────────────────────────────────────────────
+
+export function getNostrShareUrl(pubkey: string, dtag: string): string {
+    return `${location.protocol}//${location.host}${location.pathname}#/nostr/${pubkey}/${dtag}`;
+}
+
+// ── Fan-fetch helpers (parallel, deduplicated, status-tracking) ───────────────
+
+async function fanGet(
+    filter: Parameters<SimplePool['get']>[1],
+    relays: string[] = NOSTR_RELAYS,
+): Promise<NostrEvent | null> {
+    const results = await Promise.allSettled(
+        relays.map(async relay => {
+            try {
+                const event = await _pool.get([relay], filter, { maxWait: RELAY_TIMEOUT_MS });
+                _setHealth(relay, 'connected');
+                return event;
+            } catch {
+                _setHealth(relay, 'error');
+                return null;
+            }
+        }),
+    );
+    for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) return r.value;
+    }
+    return null;
+}
+
+async function fanQuery(filter: Parameters<SimplePool['querySync']>[1]): Promise<NostrEvent[]> {
+    const results = await Promise.allSettled(
+        NOSTR_RELAYS.map(async relay => {
+            try {
+                const events = await _pool.querySync([relay], filter, { maxWait: RELAY_TIMEOUT_MS });
+                _setHealth(relay, 'connected');
+                return events;
+            } catch {
+                _setHealth(relay, 'error');
+                return [] as NostrEvent[];
+            }
+        }),
+    );
+    const seen = new Set<string>();
+    const merged: NostrEvent[] = [];
+    for (const r of results) {
+        for (const ev of r.status === 'fulfilled' ? r.value : []) {
+            if (!seen.has(ev.id)) {
+                seen.add(ev.id);
+                merged.push(ev);
+            }
+        }
+    }
+    return merged;
+}
+
+// ── Publish ───────────────────────────────────────────────────────────────────
+
+let _lastPublishedEvents: { index: NostrEvent; data: NostrEvent } | null = null;
+
+/** Retry publishing the last pair of signed events to a specific relay. */
+export async function retryRelay(relay: string): Promise<void> {
+    if (!_lastPublishedEvents) return;
+    _setHealth(relay, 'checking');
+    const { index, data } = _lastPublishedEvents;
+    const dataPromises = _pool.publish([relay], data);
+    const indexPromises = _pool.publish([relay], index);
+    try {
+        await Promise.race([
+            Promise.all([dataPromises[0], indexPromises[0]]),
+            new Promise<never>((_, reject) => setTimeout(reject, 10000)),
+        ]);
+        _setHealth(relay, 'connected');
+    } catch {
+        _setHealth(relay, 'error');
+    }
+}
+
+export async function publishPlan(
+    scene: Scene,
+    name: string,
+    visibility: 'public' | 'private',
+): Promise<NostrFileSource> {
+    const sk = await getOrCreateSecretKey();
+    const pk = getPublicKey(sk);
+    const now = Math.floor(Date.now() / 1000);
+
+    const planJson = sceneToJson(scene);
+
+    // Encrypt content for private plans (NIP-44 self-encryption — only this key can decrypt)
+    let dataContent: string;
+    if (visibility === 'private') {
+        const convKey = nip44.getConversationKey(sk, pk);
+        dataContent = nip44.encrypt(planJson, convKey);
+    } else {
+        dataContent = planJson;
+    }
+
+    // Data event (kind 30079) — full plan content
+    const dataEvent = finalizeEvent(
+        {
+            kind: PLAN_DATA_KIND,
+            created_at: now,
+            tags: [
+                ['d', name],
+                ['v', String(XIVPLAN_FORMAT_VERSION)],
+            ],
+            content: dataContent,
+        },
+        sk,
+    );
+
+    // Index event (kind 30078) — metadata + pointer to data event
+    const indexTags: string[][] = [
+        ['d', name],
+        ['v', String(XIVPLAN_FORMAT_VERSION)],
+        ['e', dataEvent.id],
+    ];
+    if (visibility === 'private') {
+        indexTags.push(['enc', 'nip44-self']);
+    }
+
+    const indexEvent = finalizeEvent(
+        {
+            kind: PLAN_KIND,
+            created_at: now,
+            tags: indexTags,
+            content: '',
+        },
+        sk,
+    );
+
+    _lastPublishedEvents = { index: indexEvent, data: dataEvent };
+
+    // Publish both events in parallel — data first so it's available when index arrives
+    const dataPublish = _pool.publish(NOSTR_RELAYS, dataEvent);
+    const indexPublish = _pool.publish(NOSTR_RELAYS, indexEvent);
+
+    const relayResults = await Promise.allSettled(
+        NOSTR_RELAYS.map(async (relay, i) => {
+            try {
+                await Promise.race([
+                    Promise.all([dataPublish[i], indexPublish[i]]),
+                    new Promise<never>((_, reject) => setTimeout(reject, 10000)),
+                ]);
+                _setHealth(relay, 'connected');
+            } catch (ex) {
+                _setHealth(relay, 'error');
+                throw ex;
+            }
+        }),
+    );
+
+    const accepted = relayResults.filter(r => r.status === 'fulfilled').length;
+    if (accepted === 0) {
+        throw new Error('No relay accepted the event. Check your connection and try again.');
+    }
+
+    // Verify index on accepted relays only — no new WS connections to failed relays
+    const acceptedRelays = NOSTR_RELAYS.filter((_, i) => relayResults[i].status === 'fulfilled');
+    const stored = await fanGet({ kinds: [PLAN_KIND], authors: [pk], '#d': [name] }, acceptedRelays);
+
+    if (!stored) {
+        throw new Error('Verification failed — the plan was not found on any relay after publishing.');
+    }
+    if (stored.id !== indexEvent.id) {
+        throw new Error(
+            'A conflicting version was found on the relay — another session may have ' +
+                'published changes at the same time. Reload the plan and try again.',
+        );
+    }
+
+    invalidateVaultCache(pk);
+    return { type: 'nostr', name, pubkey: pk, visibility };
+}
+
+// ── Fetch ─────────────────────────────────────────────────────────────────────
+
+export interface FetchPlanResult {
+    scene: Scene;
+    visibility: 'public' | 'private';
+}
+
+export async function fetchPlan(pubkey: string, name: string): Promise<FetchPlanResult> {
+    // Step 1: index event (kind 30078) — tells us visibility and the data event ID
+    const indexEvent = await fanGet({ kinds: [PLAN_KIND], authors: [pubkey], '#d': [name] });
+    if (!indexEvent) throw new Error(`Plan "${name}" not found on any relay.`);
+
+    // Step 2: data event ID from the index's e tag
+    const dataEventId = indexEvent.tags.find(t => t[0] === 'e')?.[1];
+    if (!dataEventId) throw new Error(`Plan "${name}" index has no data reference — it may be corrupted.`);
+
+    // Step 3: data event (kind 30079) by ID
+    const dataEvent = await fanGet({ ids: [dataEventId] });
+    if (!dataEvent) throw new Error(`Plan data for "${name}" was not found on any relay.`);
+
+    // Step 4: decrypt if private
+    const encTag = indexEvent.tags.find(t => t[0] === 'enc')?.[1];
+    const visibility: 'public' | 'private' = encTag === 'nip44-self' ? 'private' : 'public';
+    let content = dataEvent.content;
+
+    if (visibility === 'private') {
+        const sk = await getOrCreateSecretKey();
+        const ownPk = getPublicKey(sk);
+        if (ownPk !== pubkey) {
+            throw new Error('This plan is private and can only be opened with the key that published it.');
+        }
+        const convKey = nip44.getConversationKey(sk, ownPk);
+        content = nip44.decrypt(content, convKey);
+    }
+
+    return { scene: jsonToScene(content), visibility };
+}
+
+// ── Delete (NIP-09) ───────────────────────────────────────────────────────────
+
+/** Sends a kind 5 deletion request for both the index and data events. */
+export async function deletePlan(dtag: string): Promise<void> {
+    const sk = await getOrCreateSecretKey();
+    const pk = getPublicKey(sk);
+
+    const event = finalizeEvent(
+        {
+            kind: 5,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ['a', `${PLAN_KIND}:${pk}:${dtag}`],       // index event
+                ['a', `${PLAN_DATA_KIND}:${pk}:${dtag}`],  // data event
+            ],
+            content: '',
+        },
+        sk,
+    );
+
+    await Promise.any(_pool.publish(NOSTR_RELAYS, event));
+    invalidateVaultCache(pk);
+}
+
+// ── Duplicate ─────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch a plan and republish it under a new name in the current user's vault.
+ * Works for own private plans and other users' public plans.
+ * Fails if the source plan is private and not owned by the current key.
+ */
+export async function duplicatePlan(
+    sourcePubkey: string,
+    sourceDtag: string,
+    newName: string,
+): Promise<NostrFileSource> {
+    const { scene, visibility } = await fetchPlan(sourcePubkey, sourceDtag);
+    return publishPlan(scene, newName, visibility);
+}
+
+// ── Vault listing ─────────────────────────────────────────────────────────────
+
+export interface NostrPlanInfo {
+    dtag: string;
+    publishedAt: Date;
+    visibility: 'public' | 'private';
+}
+
+const VAULT_PAGE_SIZE = 5;
+
+interface VaultCachePage {
+    plans: NostrPlanInfo[];
+    hasMore: boolean;
+    fetchedAt: number;
+}
+
+const _vaultCache = new Map<string, VaultCachePage>();
+const VAULT_CACHE_TTL = 5 * 60 * 1000;
+
+/** Evict cached vault page(s). Call after publish or delete to force a fresh fetch. */
+export function invalidateVaultCache(pubkey?: string): void {
+    if (pubkey) _vaultCache.delete(pubkey);
+    else _vaultCache.clear();
+}
+
+/**
+ * List plans for any pubkey with pagination.
+ * First-page results are cached per pubkey for VAULT_CACHE_TTL (5 min).
+ * Returns `cached: true` when the result came from cache (no relay traffic).
+ * Queries only kind 30078 (index events) — data events (kind 30079) never appear.
+ */
+export async function listPlans(
+    pubkey: string,
+    opts: { until?: number; dtag?: string } = {},
+): Promise<{ plans: NostrPlanInfo[]; hasMore: boolean; cached: boolean }> {
+    const isFirstPage = opts.until === undefined && !opts.dtag;
+
+    if (isFirstPage) {
+        const cached = _vaultCache.get(pubkey);
+        if (cached && Date.now() - cached.fetchedAt < VAULT_CACHE_TTL) {
+            return { plans: cached.plans, hasMore: cached.hasMore, cached: true };
+        }
+    }
+
+    const fetchLimit = VAULT_PAGE_SIZE + 1;
+    const events = await fanQuery({
+        kinds: [PLAN_KIND],
+        authors: [pubkey],
+        limit: fetchLimit,
+        ...(opts.until !== undefined && { until: opts.until }),
+        ...(opts.dtag && { '#d': [opts.dtag] }),
+    });
+
+    const result = buildPage(events, fetchLimit);
+
+    if (isFirstPage) {
+        _vaultCache.set(pubkey, { ...result, fetchedAt: Date.now() });
+    }
+
+    return { ...result, cached: false };
+}
+
+/** Convenience wrapper — lists the current user's own plans. */
+export async function listOwnPlans(
+    opts: { until?: number; dtag?: string } = {},
+): Promise<{ plans: NostrPlanInfo[]; hasMore: boolean; cached: boolean }> {
+    return listPlans(await getNostrPubkey(), opts);
+}
+
+function buildPage(events: NostrEvent[], fetchLimit: number): { plans: NostrPlanInfo[]; hasMore: boolean } {
+    events.sort((a, b) => b.created_at - a.created_at);
+    const hasMore = events.length > VAULT_PAGE_SIZE;
+    const page = events.slice(0, VAULT_PAGE_SIZE);
+    const plans = page
+        .map(e => ({
+            dtag: e.tags.find(t => t[0] === 'd')?.[1] ?? '',
+            publishedAt: new Date(e.created_at * 1000),
+            visibility: (e.tags.some(t => t[0] === 'enc') ? 'private' : 'public') as 'public' | 'private',
+        }))
+        .filter(p => p.dtag);
+    return { plans, hasMore };
+}
+
+// ── Suspense-compatible fetch for URL loading ─────────────────────────────────
+
+let _cacheKey = '';
+let _cachedPromise: Promise<Scene | undefined> | undefined;
+let _cachedVisibility: 'public' | 'private' | undefined;
+let _cachedError: unknown;
+
+export function getNostrFetchPromise(pubkey: string, dtag: string): Promise<Scene | undefined> {
+    const key = `${pubkey}:${dtag}`;
+    if (key === _cacheKey && _cachedPromise) return _cachedPromise;
+
+    _cacheKey = key;
+    _cachedError = undefined;
+    _cachedVisibility = undefined;
+    _cachedPromise = fetchPlan(pubkey, dtag)
+        .then(result => {
+            _cachedVisibility = result.visibility;
+            return result.scene;
+        })
+        .catch(ex => {
+            console.error('Failed to fetch Nostr plan', ex);
+            _cachedError = ex;
+            return undefined;
+        });
+
+    return _cachedPromise;
+}
+
+export function getNostrFetchError(): unknown {
+    return _cachedError;
+}
+
+export function getNostrFetchedVisibility(): 'public' | 'private' | undefined {
+    return _cachedVisibility;
+}

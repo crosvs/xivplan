@@ -16,10 +16,11 @@ import { HotkeyBlockingDialogBody } from '../HotkeyBlockingDialogBody';
 import { TabActivity } from '../TabActivity';
 import { FileSystemNotSupportedMessage, OpenFileSystem, SaveFileSystem } from './FileDialogFileSystem';
 import { OpenLocalStorage, SaveLocalStorage } from './FileDialogLocalStorage';
+import { OpenNostr, SaveNostr } from './FileDialogNostr';
 import { ImportFromString } from './FileDialogShare';
 import { supportsFs } from './filesystem';
 
-type Tabs = 'file' | 'localStorage' | 'import' | 'fileUnsupported';
+type Tabs = 'file' | 'localStorage' | 'nostr' | 'import' | 'fileUnsupported';
 
 export type OpenDialogProps = Omit<DialogProps, 'children'>;
 
@@ -42,6 +43,7 @@ export const OpenDialog: React.FC<OpenDialogProps> = (props) => {
                         >
                             {supportsFs && <Tab value="file">Local file</Tab>}
                             <Tab value="localStorage">Browser storage</Tab>
+                            <Tab value="nostr">Nostr</Tab>
                             <Tab value="import">Import plan link</Tab>
                             {!supportsFs && <Tab value="fileUnsupported">Local file</Tab>}
                         </TabList>
@@ -50,6 +52,9 @@ export const OpenDialog: React.FC<OpenDialogProps> = (props) => {
                         </TabActivity>
                         <TabActivity value="localStorage" activeTab={tab}>
                             <OpenLocalStorage actions={portalNode} />
+                        </TabActivity>
+                        <TabActivity value="nostr" activeTab={tab}>
+                            <OpenNostr actions={portalNode} />
                         </TabActivity>
                         <TabActivity value="import" activeTab={tab}>
                             <ImportFromString actions={portalNode} />
@@ -88,6 +93,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = (props) => {
                         >
                             {supportsFs && <Tab value="file">Local file</Tab>}
                             <Tab value="localStorage">Browser storage</Tab>
+                            <Tab value="nostr">Nostr</Tab>
                             {!supportsFs && <Tab value="fileUnsupported">Local file</Tab>}
                         </TabList>
                         <TabActivity value="file" activeTab={tab}>
@@ -95,6 +101,9 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = (props) => {
                         </TabActivity>
                         <TabActivity value="localStorage" activeTab={tab}>
                             <SaveLocalStorage actions={portalNode} />
+                        </TabActivity>
+                        <TabActivity value="nostr" activeTab={tab}>
+                            <SaveNostr actions={portalNode} />
                         </TabActivity>
                         <TabActivity value="fileUnsupported" activeTab={tab}>
                             <FileSystemNotSupportedMessage actions={portalNode} download />
