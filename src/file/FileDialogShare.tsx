@@ -17,7 +17,7 @@ import type { Scene } from '../scene';
 import { useCloseDialog } from '../useCloseDialog';
 import { useIsDirty } from '../useIsDirty';
 import { useConfirmUnsavedChanges } from './confirm';
-import { fetchPlan, getNostrShareUrl } from './nostr';
+import { decodeNostrUrlSegments, fetchPlan, getNostrShareUrl } from './nostr';
 import { parseSceneLink } from './share';
 
 const NOSTR_PREFIX = '#/nostr/';
@@ -49,25 +49,23 @@ export const ImportFromString: React.FC<ImportFromStringProps> = ({ actions }) =
             if (url.hash.startsWith(NOSTR_PREFIX)) {
                 const rest = url.hash.slice(NOSTR_PREFIX.length);
                 const slash = rest.indexOf('/');
-                if (slash > 0) {
-                    const pubkey = decodeURIComponent(rest.slice(0, slash));
-                    const dtag = decodeURIComponent(rest.slice(slash + 1));
-                    if (pubkey && dtag) {
-                        setLoading(true);
-                        setError(undefined);
-                        try {
-                            const { scene, visibility } = await fetchPlan(pubkey, dtag);
-                            history.replaceState(null, '', getNostrShareUrl(pubkey, dtag));
-                            setSource({ type: 'nostr', name: dtag, pubkey, visibility });
-                            loadScene(scene);
-                            dismissDialog();
-                        } catch (ex) {
-                            setError(ex instanceof Error ? ex.message : 'Failed to load Nostr plan.');
-                        } finally {
-                            setLoading(false);
-                        }
-                        return;
+                const parsed = slash > 0 ? decodeNostrUrlSegments(rest.slice(0, slash), rest.slice(slash + 1)) : undefined;
+                if (parsed) {
+                    const { pubkey, id } = parsed;
+                    setLoading(true);
+                    setError(undefined);
+                    try {
+                        const { scene, visibility, name } = await fetchPlan(pubkey, id);
+                        history.replaceState(null, '', getNostrShareUrl(pubkey, id));
+                        setSource({ type: 'nostr', id, name, pubkey, visibility });
+                        loadScene(scene);
+                        dismissDialog();
+                    } catch (ex) {
+                        setError(ex instanceof Error ? ex.message : 'Failed to load Nostr plan.');
+                    } finally {
+                        setLoading(false);
                     }
+                    return;
                 }
             }
         } catch {

@@ -6,47 +6,26 @@ import {
     DialogSurface,
     DialogTitle,
     DialogTrigger,
-    DataGrid,
-    DataGridBody,
-    DataGridCell,
-    DataGridHeader,
-    DataGridHeaderCell,
-    DataGridRow,
     Field,
-    Input,
     MessageBar,
     MessageBarBody,
-    Radio,
-    RadioGroup,
     Spinner,
     Textarea,
-    TableColumnDefinition,
-    TableColumnId,
-    TableRowId,
-    Text,
     Toast,
     ToastTitle,
     Tooltip,
-    createTableColumn,
     makeStyles,
     tokens,
     useToastController,
 } from '@fluentui/react-components';
 import {
-    ArrowClockwiseRegular,
     ArrowCounterclockwiseRegular,
     ArrowDownloadRegular,
     ArrowUploadRegular,
     CopyRegular,
-    DeleteFilled,
-    DeleteRegular,
-    DocumentCopyRegular,
     KeyRegular,
-    LockClosedRegular,
-    ShareRegular,
-    bundleIcon,
 } from '@fluentui/react-icons';
-import React, { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
 import { useAsync, useAsyncFn } from 'react-use';
 import { RelayPublishList } from './RelayPublishList';
@@ -56,25 +35,18 @@ import { useLoadScene, useScene, useSetSource } from '../SceneProvider';
 import { useCloseDialog } from '../useCloseDialog';
 import { useIsDirty, useSetSavedState } from '../useIsDirty';
 import { useConfirmUnsavedChanges } from './confirm';
+import { NostrVaultList, getPublishActionLabel } from './NostrVaultList';
 import {
     NostrPlanInfo,
-    deletePlan,
-    duplicatePlan,
     exportSecretKeyBlob,
     fetchPlan,
     generateNewKey,
     getNostrPubkey,
     getNostrShareUrl,
     importSecretKey,
-    invalidateVaultCache,
-    listPlans,
-    parseInputPubkey,
     publishPlan,
     pubkeyToNpub,
-    sanitizePlanName,
 } from './nostr';
-
-const DeleteIcon = bundleIcon(DeleteFilled, DeleteRegular);
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
 
@@ -111,80 +83,6 @@ const useStyles = makeStyles({
         fontSize: tokens.fontSizeBase200,
         margin: 0,
     },
-    fileList: {
-        height: '30vh',
-        overflowY: 'auto',
-    },
-    loadMoreRow: {
-        display: 'flex',
-        justifyContent: 'center',
-        paddingTop: tokens.spacingVerticalS,
-    },
-    actions: {
-        width: '100%',
-    },
-    ownedBadge: {
-        marginLeft: tokens.spacingHorizontalXS,
-    },
-    vaultError: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: tokens.spacingVerticalS,
-    },
-    vaultHeader: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: tokens.spacingHorizontalXS,
-    },
-    staleLabel: {
-        fontSize: tokens.fontSizeBase100,
-        color: tokens.colorNeutralForeground4,
-        marginLeft: tokens.spacingHorizontalXS,
-    },
-    lockedRow: {
-        opacity: 0.45,
-        pointerEvents: 'none',
-    },
-    overwriteList: {
-        display: 'flex',
-        flexDirection: 'column',
-        maxHeight: '130px',
-        overflowY: 'auto',
-        border: `1px solid ${tokens.colorNeutralStroke2}`,
-        borderRadius: tokens.borderRadiusMedium,
-    },
-    overwriteRow: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: tokens.spacingHorizontalS,
-        padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-        cursor: 'pointer',
-        border: 'none',
-        backgroundColor: 'transparent',
-        width: '100%',
-        textAlign: 'left',
-        fontSize: tokens.fontSizeBase200,
-        ':hover': {
-            backgroundColor: tokens.colorNeutralBackground2Hover,
-        },
-    },
-    overwriteRowSelected: {
-        backgroundColor: tokens.colorBrandBackground2,
-        ':hover': {
-            backgroundColor: tokens.colorBrandBackground2Hover,
-        },
-    },
-    overwriteRowName: {
-        flexGrow: 1,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-    },
-    overwriteRowDate: {
-        flexShrink: 0,
-        color: tokens.colorNeutralForeground3,
-        fontSize: tokens.fontSizeBase100,
-    },
 });
 
 // ── Key section (shared between Open and Save) ────────────────────────────────
@@ -195,6 +93,8 @@ export const KeySection: React.FC = () => {
     const [importError, setImportError] = useState('');
     const [showNewKeyConfirm, setShowNewKeyConfirm] = useState(false);
     const [keySaved, setKeySaved] = useState(false);
+    const isDirty = useIsDirty();
+    const [confirmUnsavedChanges, renderUnsavedChangesModal] = useConfirmUnsavedChanges();
 
     const pubkeyState = useAsync(getNostrPubkey);
 
@@ -210,7 +110,11 @@ export const KeySection: React.FC = () => {
         URL.revokeObjectURL(url);
     };
 
+    // Switching keys reloads the page (the simplest way to clear all key-derived state), which
+    // would silently discard any unsaved scene edits — confirm first, same as opening a different
+    // file/plan elsewhere in the app.
     const handleImportFile = async (file: File) => {
+        if (isDirty && !(await confirmUnsavedChanges())) return;
         setImportError('');
         try {
             const text = await file.text();
@@ -222,6 +126,7 @@ export const KeySection: React.FC = () => {
     };
 
     const doGenerateNew = async () => {
+        if (isDirty && !(await confirmUnsavedChanges())) return;
         await generateNewKey();
         window.location.reload();
     };
@@ -238,7 +143,7 @@ export const KeySection: React.FC = () => {
         <div className={classes.section}>
             <span className={classes.sectionLabel}>
                 <KeyRegular />
-                Key
+                Vault Key
             </span>
             <div className={classes.keyRow}>
                 <Tooltip content={npub ?? 'Loading…'} relationship="description" withArrow>
@@ -306,15 +211,12 @@ export const KeySection: React.FC = () => {
                     </DialogActions>
                 </DialogSurface>
             </Dialog>
+            {renderUnsavedChangesModal()}
         </div>
     );
 };
 
 // ── Save to Nostr ─────────────────────────────────────────────────────────────
-
-function getInitialName(source: ReturnType<typeof useScene>['source']) {
-    return source?.type === 'nostr' ? source.name : '';
-}
 
 function getInitialVisibility(source: ReturnType<typeof useScene>['source']): 'public' | 'private' {
     return source?.type === 'nostr' && source.visibility === 'private' ? 'private' : 'public';
@@ -326,43 +228,45 @@ export interface SaveNostrProps {
 
 export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
     const classes = useStyles();
+    const isDirty = useIsDirty();
     const setSavedState = useSetSavedState();
     const setSource = useSetSource();
     const { canonicalScene, source } = useScene();
-    const [name, setName] = useState(getInitialName(source));
+    const currentOpenId = source?.type === 'nostr' ? source.id : undefined;
+
+    // This dialog is always reached via "Save As" — the "New plan" row is the default selection
+    // even when a nostr plan is already open, so publishing without picking a row always forks a
+    // new plan rather than silently overwriting the one that happens to be open.
+    const [newName, setNewName] = useState('');
+    const [planId, setPlanId] = useState<string | undefined>(undefined);
+    const [selectedPlan, setSelectedPlan] = useState<NostrPlanInfo | undefined>(undefined);
     const [visibility, setVisibility] = useState<'public' | 'private'>(() => getInitialVisibility(source));
     const relayStatus = useRelayStatus();
     const { dispatchToast } = useToastController();
     const [publishedUrl, setPublishedUrl] = useState('');
 
-    // Own vault — for selecting an existing plan to overwrite
-    const ownPubkeyState = useAsync(getNostrPubkey);
-    const [vaultState, refreshVault] = useAsyncFn(async (pubkey: string, bust = false) => {
-        if (bust) invalidateVaultCache(pubkey);
-        return listPlans(pubkey);
-    }, []);
-    useEffect(() => {
-        if (ownPubkeyState.value) refreshVault(ownPubkeyState.value);
-    }, [ownPubkeyState.value, refreshVault]);
-
-    const selectVaultItem = (item: NostrPlanInfo) => {
-        setName(item.dtag);
-        setVisibility(item.visibility);
-    };
-
-    const canSave = !!name.trim() && relayStatus.anyConnected;
+    // The name field doubles as an inline rename for the selected existing plan (see
+    // NostrVaultList's renameSelectedInline) — whatever's typed here is what gets published.
+    const actionLabel = getPublishActionLabel(planId, currentOpenId);
+    const nameChanged = selectedPlan !== undefined && newName.trim() !== selectedPlan.name;
+    const visibilityChanged = selectedPlan !== undefined && visibility !== selectedPlan.visibility;
+    // Nothing to save only when the target is exactly the plan already open, with no edits, no
+    // rename, and no access change pending.
+    const targetIsCurrentOpenPlan = planId !== undefined && planId === currentOpenId;
+    const canSave =
+        !!newName.trim() &&
+        relayStatus.anyConnected &&
+        (!targetIsCurrentOpenPlan || isDirty || nameChanged || visibilityChanged);
 
     const [saveState, save] = useAsyncFn(async () => {
         if (!canSave) return;
-        const nostrSource = await publishPlan(canonicalScene, name.trim(), visibility);
-        const url = getNostrShareUrl(nostrSource.pubkey, nostrSource.name);
+        const nostrSource = await publishPlan(canonicalScene, newName.trim(), visibility, planId);
+        const url = getNostrShareUrl(nostrSource.pubkey, nostrSource.id);
         history.replaceState(null, '', url);
         setSource(nostrSource);
         setSavedState(canonicalScene);
         setPublishedUrl(url);
-    }, [canonicalScene, name, visibility, canSave, setSource, setSavedState]);
-
-    const isLocked = saveState.loading || !!publishedUrl;
+    }, [canonicalScene, newName, planId, visibility, canSave, setSource, setSavedState]);
 
     const copyUrl = async () => {
         await navigator.clipboard.writeText(publishedUrl);
@@ -374,101 +278,33 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
         );
     };
 
-    const onKeyUp = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key === 'Enter' && !isLocked) {
-            event.preventDefault();
-            save();
-        }
-    };
-
-    const vaultPlans = vaultState.value?.plans ?? [];
-    const vaultCached = vaultState.value?.cached ?? false;
-
     return (
         <>
-            <KeySection />
+            {!publishedUrl && (<KeySection />)}
 
             {!publishedUrl && (
-                <div
-                    className={classes.section}
-                    style={saveState.loading ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
-                >
-                    <span className={classes.sectionLabel}>
-                        <span className={classes.vaultHeader}>
-                            Vault
-                            <RelayStatusDot status={relayStatus} />
-                            {vaultCached && <span className={classes.staleLabel}>cached</span>}
-                            {ownPubkeyState.value && (
-                                <Tooltip content="Refresh vault" relationship="label" withArrow>
-                                    <Button
-                                        size="small"
-                                        appearance="subtle"
-                                        icon={<ArrowClockwiseRegular />}
-                                        disabled={vaultState.loading}
-                                        onClick={() => refreshVault(ownPubkeyState.value!, true)}
-                                    />
-                                </Tooltip>
-                            )}
-                        </span>
-                    </span>
-
-                    {vaultPlans.length > 0 && (
-                        <div className={classes.overwriteList}>
-                            {vaultPlans.map((item) => (
-                                <button
-                                    key={item.dtag}
-                                    className={`${classes.overwriteRow} ${item.dtag === name ? classes.overwriteRowSelected : ''}`}
-                                    onClick={() => selectVaultItem(item)}
-                                    type="button"
-                                >
-                                    {item.visibility === 'private' && (
-                                        <LockClosedRegular
-                                            style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}
-                                        />
-                                    )}
-                                    <span className={classes.overwriteRowName}>{item.dtag}</span>
-                                    <span className={classes.overwriteRowDate}>
-                                        {item.publishedAt.toLocaleDateString()}
-                                    </span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                <NostrVaultList
+                    ownVaultOnly
+                    showPublishAsNew
+                    renameSelectedInline
+                    newPlanName={newName}
+                    onNewPlanNameChange={setNewName}
+                    visibility={visibility}
+                    onVisibilityChange={setVisibility}
+                    selectedId={planId}
+                    onSelectedChange={(item) => {
+                        setSelectedPlan(item);
+                        setPlanId(item?.id);
+                        if (item) {
+                            setVisibility(item.visibility);
+                            setNewName(item.name);
+                        } else {
+                            setNewName('');
+                        }
+                    }}
+                    disabled={saveState.loading}
+                />
             )}
-
-            <div className={classes.section}>
-                <Field label="Plan name" hint="Letters, numbers, spaces, hyphens, and underscores only.">
-                    <Input
-                        type="text"
-                        autoFocus
-                        value={name}
-                        placeholder="e.g. p1-progression-week1"
-                        onChange={(ev, data) => setName(sanitizePlanName(data.value))}
-                        onKeyUp={onKeyUp}
-                        disabled={isLocked}
-                    />
-                </Field>
-                <Field label="Visibility">
-                    <RadioGroup
-                        value={visibility}
-                        onChange={(_, d) => setVisibility(d.value as 'public' | 'private')}
-                        layout="horizontal"
-                        disabled={isLocked}
-                    >
-                        <Radio value="public" label="Public" />
-                        <Radio value="private" label="Private" />
-                    </RadioGroup>
-                </Field>
-                {visibility === 'private' && (
-                    <p className={classes.hint}>Content is encrypted — only you (with your key) can open this plan.</p>
-                )}
-                {!publishedUrl && (
-                    <p className={classes.hint}>
-                        Publishing with the same name overwrites the previous version — the share URL stays the same.
-                    </p>
-                )}
-            </div>
 
             {publishedUrl && (
                 <div className={classes.section}>
@@ -508,7 +344,7 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
                                 icon={saveState.loading ? <Spinner size="tiny" /> : undefined}
                                 onClick={save}
                             >
-                                {saveState.loading ? 'Publishing…' : 'Publish to Nostr'}
+                                {saveState.loading ? 'Publishing…' : actionLabel}
                             </Button>
                             <DialogTrigger disableButtonEnhancement>
                                 <Button>Cancel</Button>
@@ -523,102 +359,32 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
 
 // ── Open from Nostr ───────────────────────────────────────────────────────────
 
-const getCellFocusMode = (columnId: TableColumnId) => (columnId === 'actions' ? 'none' : 'cell');
-
 export interface OpenNostrProps {
     actions: HtmlPortalNode;
 }
 
 export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
-    const classes = useStyles();
     const isDirty = useIsDirty();
     const loadScene = useLoadScene();
     const setSource = useSetSource();
     const dismissDialog = useCloseDialog();
     const [confirmUnsavedChanges, renderModal] = useConfirmUnsavedChanges();
-    const relayStatus = useRelayStatus();
-    const { dispatchToast } = useToastController();
 
     const ownPubkeyState = useAsync(getNostrPubkey);
-    const ownPubkey = ownPubkeyState.value;
 
-    // Author filter — empty means own vault; valid npub/hex switches to that author
-    const [authorInput, setAuthorInput] = useState('');
-    const parsedBrowsePubkey = useMemo(() => {
-        const trimmed = authorInput.trim();
-        if (!trimmed) return null;
-        const parsed = parseInputPubkey(trimmed);
-        return /^[0-9a-f]{64}$/.test(parsed) ? parsed : null;
-    }, [authorInput]);
-
-    const currentPubkey = parsedBrowsePubkey ?? ownPubkey ?? null;
-    const isOwnVault = !parsedBrowsePubkey || parsedBrowsePubkey === ownPubkey;
-
-    // Vault listing
-    const [vaultPlans, setVaultPlans] = useState<NostrPlanInfo[]>([]);
-    const [vaultHasMore, setVaultHasMore] = useState(false);
-    const [vaultUntil, setVaultUntil] = useState<number | undefined>();
-    const [vaultCached, setVaultCached] = useState(false);
-    const [selectedVaultRow, setSelectedVaultRow] = useState<TableRowId | undefined>();
-    const [isVaultStale, setIsVaultStale] = useState(false);
-    const selectedPlan = vaultPlans.find((p) => p.dtag === selectedVaultRow);
-    const selectedIsLocked = selectedPlan !== undefined && selectedPlan.visibility === 'private' && !isOwnVault;
-
-    const [vaultState, loadVault] = useAsyncFn(async (pubkey: string, until?: number, bust = false) => {
-        if (bust) invalidateVaultCache(pubkey);
-        const { plans, hasMore, cached, stale } = await listPlans(pubkey, { until });
-        setVaultPlans((prev) => (until === undefined ? plans : [...prev, ...plans]));
-        setVaultHasMore(hasMore);
-        setVaultCached(cached);
-        setIsVaultStale(stale && until === undefined);
-        const lastPlan = plans.at(-1);
-        if (lastPlan) {
-            setVaultUntil(Math.floor(lastPlan.publishedAt.getTime() / 1000) - 1);
-        }
-    }, []);
-
-    // Reload vault when the active pubkey changes
-    const prevPubkeyRef = useRef<string | null>(null);
-    useEffect(() => {
-        if (!currentPubkey) return;
-        if (currentPubkey === prevPubkeyRef.current) return;
-        prevPubkeyRef.current = currentPubkey;
-        setVaultPlans([]);
-        setVaultHasMore(false);
-        setVaultUntil(undefined);
-        setSelectedVaultRow(undefined);
-        setIsVaultStale(false);
-        loadVault(currentPubkey);
-    }, [currentPubkey, loadVault]);
-
-    // When stale data is shown, immediately kick off a background refresh.
-    useEffect(() => {
-        if (!isVaultStale || !currentPubkey) return;
-        invalidateVaultCache(currentPubkey);
-        loadVault(currentPubkey);
-        // loadVault is stable (useAsyncFn with [] deps); currentPubkey changes reset isVaultStale first.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isVaultStale, currentPubkey]);
-
-    // Duplicate dialog state
-    const [duplicateSource, setDuplicateSource] = useState<NostrPlanInfo | null>(null);
-    const [duplicateName, setDuplicateName] = useState('');
-    const [duplicateState, startDuplicate] = useAsyncFn(async () => {
-        if (!duplicateSource || !currentPubkey) return;
-        await duplicatePlan(currentPubkey, duplicateSource.dtag, duplicateName.trim());
-        setDuplicateSource(null);
-        setDuplicateName('');
-        if (ownPubkey) loadVault(ownPubkey, undefined, true);
-    }, [duplicateSource, duplicateName, currentPubkey, ownPubkey, loadVault]);
+    const [selectedItem, setSelectedItem] = useState<NostrPlanInfo | undefined>(undefined);
+    const [selectedPubkey, setSelectedPubkey] = useState<string | null>(null);
+    const selectedIsLocked =
+        selectedItem !== undefined && selectedItem.visibility === 'private' && selectedPubkey !== ownPubkeyState.value;
 
     const [openState, openPlan] = useAsyncFn(
-        async (pubkey: string, dtag: string) => {
+        async (pubkey: string, id: string) => {
             if (isDirty && !(await confirmUnsavedChanges())) return;
 
-            const { scene, visibility } = await fetchPlan(pubkey, dtag);
-            const nostrSource = { type: 'nostr' as const, name: dtag, pubkey, visibility };
+            const { scene, visibility, name } = await fetchPlan(pubkey, id);
+            const nostrSource = { type: 'nostr' as const, id, name, pubkey, visibility };
 
-            history.replaceState(null, '', getNostrShareUrl(pubkey, dtag));
+            history.replaceState(null, '', getNostrShareUrl(pubkey, id));
 
             loadScene(scene);
             setSource(nostrSource);
@@ -627,214 +393,19 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
         [isDirty, loadScene, setSource, dismissDialog, confirmUnsavedChanges],
     );
 
-    const handleDelete = useCallback(
-        async (dtag: string) => {
-            await deletePlan(dtag);
-            setVaultPlans((prev) => prev.filter((p) => p.dtag !== dtag));
-            if (selectedVaultRow === dtag) setSelectedVaultRow(undefined);
-        },
-        [selectedVaultRow],
-    );
-
-    const handleCopyLink = useCallback(
-        async (item: NostrPlanInfo) => {
-            if (!currentPubkey) return;
-            await navigator.clipboard.writeText(getNostrShareUrl(currentPubkey, item.dtag));
-            dispatchToast(
-                <Toast>
-                    <ToastTitle>Link copied</ToastTitle>
-                </Toast>,
-                { intent: 'success' },
-            );
-        },
-        [currentPubkey, dispatchToast],
-    );
-
-    const vaultColumns: TableColumnDefinition<NostrPlanInfo>[] = [
-        createTableColumn<NostrPlanInfo>({
-            columnId: 'name',
-            renderHeaderCell: () => 'Plan name',
-            renderCell: (item) => (
-                <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
-                    {item.visibility === 'private' && (
-                        <Tooltip content="Private — encrypted" relationship="label" withArrow>
-                            <LockClosedRegular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
-                        </Tooltip>
-                    )}
-                    {item.dtag}
-                </span>
-            ),
-        }),
-        createTableColumn<NostrPlanInfo>({
-            columnId: 'date',
-            renderHeaderCell: () => 'Published',
-            renderCell: (item) => item.publishedAt.toLocaleString(),
-        }),
-        createTableColumn<NostrPlanInfo>({
-            columnId: 'actions',
-            renderHeaderCell: () => 'Actions',
-            renderCell: (item) => (
-                <div style={{ display: 'flex' }}>
-                    <Tooltip content="Share link" appearance="inverted" relationship="label" withArrow>
-                        <Button
-                            appearance="subtle"
-                            aria-label="Share link"
-                            icon={<ShareRegular />}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleCopyLink(item);
-                            }}
-                        />
-                    </Tooltip>
-                    <Tooltip content="Duplicate as…" appearance="inverted" relationship="label" withArrow>
-                        <Button
-                            appearance="subtle"
-                            aria-label="Duplicate"
-                            icon={<DocumentCopyRegular />}
-                            disabled={isVaultStale}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setDuplicateName(`${item.dtag}-copy`);
-                                setDuplicateSource(item);
-                            }}
-                        />
-                    </Tooltip>
-                    {isOwnVault && (
-                        <Tooltip content={`Delete ${item.dtag}`} appearance="inverted" relationship="label" withArrow>
-                            <Button
-                                appearance="subtle"
-                                aria-label="Delete"
-                                icon={<DeleteIcon />}
-                                disabled={isVaultStale}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDelete(item.dtag);
-                                }}
-                            />
-                        </Tooltip>
-                    )}
-                </div>
-            ),
-        }),
-    ];
-
     return (
         <>
             <KeySection />
 
-            <div className={classes.section}>
-                <span className={classes.sectionLabel}>
-                    <span className={classes.vaultHeader}>
-                        <KeyRegular />
-                        {isOwnVault ? 'Your Vault' : 'Browsing'}
-                        <RelayStatusDot
-                            status={relayStatus}
-                            style={isVaultStale ? { opacity: 0.35, filter: 'grayscale(1)' } : undefined}
-                        />
-                        {vaultCached && !isVaultStale && <span className={classes.staleLabel}>cached</span>}
-                        {currentPubkey && (
-                            <Tooltip content="Refresh vault" relationship="label" withArrow>
-                                <Button
-                                    size="small"
-                                    appearance="subtle"
-                                    icon={vaultState.loading ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
-                                    disabled={vaultState.loading}
-                                    onClick={() => currentPubkey && loadVault(currentPubkey, undefined, true)}
-                                />
-                            </Tooltip>
-                        )}
-                    </span>
-                </span>
-
-                <Field label={isOwnVault ? 'Browse another author' : 'Author'}>
-                    <Input
-                        value={authorInput}
-                        placeholder="npub1… or hex pubkey (empty = your vault)"
-                        onChange={(_, d) => setAuthorInput(d.value)}
-                    />
-                </Field>
-
-                {vaultState.loading && vaultPlans.length === 0 ? (
-                    <Spinner size="small" label="Loading vault…" />
-                ) : vaultState.error && vaultPlans.length === 0 ? (
-                    <div className={classes.vaultError}>
-                        <MessageBar intent="error">
-                            <MessageBarBody>
-                                {vaultState.error instanceof Error
-                                    ? vaultState.error.message
-                                    : String(vaultState.error)}
-                            </MessageBarBody>
-                        </MessageBar>
-                        <Button size="small" onClick={() => currentPubkey && loadVault(currentPubkey)}>
-                            Retry
-                        </Button>
-                    </div>
-                ) : vaultPlans.length > 0 ? (
-                    <>
-                        <DataGrid
-                            items={vaultPlans}
-                            columns={vaultColumns}
-                            getRowId={(item: NostrPlanInfo) => item.dtag}
-                            size="small"
-                            selectionMode="single"
-                            selectedItems={selectedVaultRow !== undefined ? new Set([selectedVaultRow]) : new Set()}
-                            onSelectionChange={(_, data) => setSelectedVaultRow([...data.selectedItems][0])}
-                            subtleSelection
-                        >
-                            <DataGridHeader>
-                                <DataGridRow>
-                                    {({ renderHeaderCell }) => (
-                                        <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
-                                    )}
-                                </DataGridRow>
-                            </DataGridHeader>
-                            <DataGridBody<NostrPlanInfo> className={classes.fileList}>
-                                {({ item, rowId }) => (
-                                    <DataGridRow<NostrPlanInfo>
-                                        key={rowId}
-                                        className={
-                                            item.visibility === 'private' && !isOwnVault ? classes.lockedRow : undefined
-                                        }
-                                        selectionCell={{ radioIndicator: { 'aria-label': 'Select plan' } }}
-                                        onDoubleClick={() => currentPubkey && openPlan(currentPubkey, item.dtag)}
-                                    >
-                                        {({ renderCell, columnId }) => (
-                                            <DataGridCell focusMode={getCellFocusMode(columnId)}>
-                                                {renderCell(item)}
-                                            </DataGridCell>
-                                        )}
-                                    </DataGridRow>
-                                )}
-                            </DataGridBody>
-                        </DataGrid>
-                        {vaultState.error && (
-                            <MessageBar intent="error">
-                                <MessageBarBody>
-                                    {vaultState.error instanceof Error
-                                        ? vaultState.error.message
-                                        : String(vaultState.error)}
-                                </MessageBarBody>
-                            </MessageBar>
-                        )}
-                        {vaultHasMore && !vaultState.error && (
-                            <div className={classes.loadMoreRow}>
-                                <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    disabled={vaultState.loading}
-                                    onClick={() => currentPubkey && loadVault(currentPubkey, vaultUntil)}
-                                >
-                                    {vaultState.loading ? <Spinner size="tiny" /> : 'Load more'}
-                                </Button>
-                            </div>
-                        )}
-                    </>
-                ) : !vaultState.loading ? (
-                    <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                        No plans found.
-                    </Text>
-                ) : null}
-            </div>
+            <NostrVaultList
+                selectedId={selectedItem?.id}
+                onSelectedChange={(item, pubkey) => {
+                    setSelectedItem(item);
+                    setSelectedPubkey(pubkey);
+                }}
+                onRowDoubleClick={(item, pubkey) => openPlan(pubkey, item.id)}
+                disabled={openState.loading}
+            />
 
             {openState.error && (
                 <MessageBar intent="error">
@@ -842,63 +413,17 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                 </MessageBar>
             )}
 
-            {/* Duplicate dialog */}
-            <Dialog
-                open={!!duplicateSource}
-                onOpenChange={(_, d) => {
-                    if (!d.open) setDuplicateSource(null);
-                }}
-            >
-                <DialogSurface>
-                    <DialogTitle>Duplicate plan</DialogTitle>
-                    <DialogContent>
-                        <p style={{ margin: `0 0 ${tokens.spacingVerticalS} 0` }}>
-                            Copy <strong>{duplicateSource?.dtag}</strong> to your vault under a new name.
-                        </p>
-                        <Field label="New plan name">
-                            <Input
-                                autoFocus
-                                value={duplicateName}
-                                onChange={(_, d) => setDuplicateName(sanitizePlanName(d.value))}
-                                placeholder="e.g. p1-copy"
-                                onKeyUp={(e) => e.key === 'Enter' && duplicateName.trim() && startDuplicate()}
-                            />
-                        </Field>
-                        {duplicateState.error && (
-                            <MessageBar intent="error" style={{ marginTop: tokens.spacingVerticalS }}>
-                                <MessageBarBody>{String(duplicateState.error)}</MessageBarBody>
-                            </MessageBar>
-                        )}
-                    </DialogContent>
-                    <DialogActions>
-                        <Button
-                            appearance="primary"
-                            disabled={!duplicateName.trim() || duplicateState.loading}
-                            icon={duplicateState.loading ? <Spinner size="tiny" /> : undefined}
-                            onClick={startDuplicate}
-                        >
-                            {duplicateState.loading ? 'Duplicating…' : 'Duplicate'}
-                        </Button>
-                        <DialogTrigger disableButtonEnhancement>
-                            <Button>Cancel</Button>
-                        </DialogTrigger>
-                    </DialogActions>
-                </DialogSurface>
-            </Dialog>
-
             {renderModal()}
 
             <InPortal node={actions}>
-                <DialogActions fluid className={classes.actions}>
+                <DialogActions>
                     <Button
                         appearance="primary"
-                        disabled={
-                            selectedVaultRow === undefined || openState.loading || !currentPubkey || selectedIsLocked
-                        }
+                        disabled={!selectedItem || openState.loading || !selectedPubkey || selectedIsLocked}
                         icon={openState.loading ? <Spinner size="tiny" /> : undefined}
                         onClick={() => {
-                            if (selectedVaultRow !== undefined && currentPubkey) {
-                                openPlan(currentPubkey, selectedVaultRow as string);
+                            if (selectedItem && selectedPubkey) {
+                                openPlan(selectedPubkey, selectedItem.id);
                             }
                         }}
                     >

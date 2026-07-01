@@ -187,7 +187,9 @@ export interface BlobFileSource {
 
 export interface NostrFileSource {
     type: 'nostr';
-    /** The d-tag, shown as the plan's filename. */
+    /** Stable random id (hex) — the Nostr d-tag and share-URL segment. Never changes for a given plan. */
+    id: string;
+    /** User-editable display name. Renaming changes this without affecting id/URL. */
     name: string;
     /** Hex public key of the event author. */
     pubkey: string;

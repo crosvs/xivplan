@@ -161,7 +161,7 @@ const SaveButton: React.FC = () => {
             savingRef.current = true;
             setIsSaving(true);
             try {
-                await publishPlan(canonicalScene, source.name, source.visibility ?? 'public');
+                await publishPlan(canonicalScene, source.name, source.visibility ?? 'public', source.id);
                 setSavedState(canonicalScene);
             } finally {
                 savingRef.current = false;

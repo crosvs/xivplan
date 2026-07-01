@@ -101,6 +101,23 @@ function hexToBytes(hex: string): Uint8Array {
     return out;
 }
 
+function bytesToBase64Url(bytes: Uint8Array): string {
+    let binary = '';
+    for (const b of bytes) binary += String.fromCharCode(b);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlToBytes(b64url: string): Uint8Array {
+    const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+}
+
+/** Random 8-byte plan id (16 hex chars) — used as the Nostr d-tag. Unique enough within one author's namespace. */
+function randomPlanId(): string {
+    return bytesToHex(crypto.getRandomValues(new Uint8Array(8)));
+}
+
 export async function getOrCreateSecretKey(): Promise<Uint8Array> {
     const stored = await nostrStore.getItem<string>('sk');
     if (stored) return hexToBytes(stored);
@@ -144,23 +161,66 @@ export function pubkeyToNpub(pubkey: string): string {
     return nip19.npubEncode(pubkey);
 }
 
+/** Decodes a bare base64url pubkey token (the format used in share URLs) back to hex. */
+function decodePubkeyToken(token: string): string | undefined {
+    try {
+        const bytes = base64UrlToBytes(token);
+        return bytes.length === 32 ? bytesToHex(bytes) : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Accepts anything a user might reasonably paste when asked for an author: an npub, a raw hex
+ * pubkey, just the pubkey segment copied out of a share URL, or the whole share URL/link.
+ */
 export function parseInputPubkey(input: string): string {
     input = input.trim();
+
+    const hashIdx = input.indexOf('#/nostr/');
+    if (hashIdx !== -1) {
+        const rest = input.slice(hashIdx + '#/nostr/'.length);
+        const slash = rest.indexOf('/');
+        const pubSegment = slash > 0 ? rest.slice(0, slash) : rest;
+        const decoded = decodePubkeyToken(pubSegment);
+        if (decoded) return decoded;
+    }
+
     if (input.startsWith('npub1')) {
         try {
             const decoded = nip19.decode(input);
             if (decoded.type === 'npub') return decoded.data;
         } catch {
-            // fall through to hex
+            // fall through
         }
     }
-    return input;
+
+    if (/^[0-9a-f]{64}$/i.test(input)) {
+        return input.toLowerCase();
+    }
+
+    return decodePubkeyToken(input) ?? input;
 }
 
 // ── URL helpers ───────────────────────────────────────────────────────────────
 
-export function getNostrShareUrl(pubkey: string, dtag: string): string {
-    return `${location.protocol}//${location.host}${location.pathname}#/nostr/${pubkey}/${encodeURIComponent(dtag)}`;
+export function getNostrShareUrl(pubkey: string, id: string): string {
+    const pubToken = bytesToBase64Url(hexToBytes(pubkey));
+    const idToken = bytesToBase64Url(hexToBytes(id));
+    return `${location.protocol}//${location.host}${location.pathname}#/nostr/${pubToken}/${idToken}`;
+}
+
+/** Decodes the two base64url URL segments back to hex pubkey/id. Returns undefined on any malformed input. */
+export function decodeNostrUrlSegments(pubToken: string, idToken: string): { pubkey: string; id: string } | undefined {
+    try {
+        const pubkeyBytes = base64UrlToBytes(pubToken);
+        const idBytes = base64UrlToBytes(idToken);
+        if (pubkeyBytes.length !== 32 || idBytes.length === 0) return undefined;
+        return { pubkey: bytesToHex(pubkeyBytes), id: bytesToHex(idBytes) };
+    } catch {
+        return undefined;
+    }
 }
 
 /** Strips characters that are unsafe in a URL path segment or Nostr d-tag. Spaces are allowed. */
@@ -264,64 +324,8 @@ export async function retryRelay(relay: string): Promise<void> {
     }
 }
 
-export async function publishPlan(
-    scene: Scene,
-    name: string,
-    visibility: 'public' | 'private',
-): Promise<NostrFileSource> {
-    const sk = await getOrCreateSecretKey();
-    const pk = getPublicKey(sk);
-    const now = Math.floor(Date.now() / 1000);
-
-    const planJson = sceneToJson(scene);
-
-    // Encrypt content for private plans (NIP-44 self-encryption — only this key can decrypt)
-    let dataContent: string;
-    if (visibility === 'private') {
-        const convKey = nip44.getConversationKey(sk, pk);
-        dataContent = nip44.encrypt(planJson, convKey);
-    } else {
-        dataContent = planJson;
-    }
-
-    // Data event (kind 30079) — full plan content, self-describing visibility via enc tag
-    const dataTags: string[][] = [
-        ['d', name],
-        ['v', String(XIVPLAN_FORMAT_VERSION)],
-    ];
-    if (visibility === 'private') {
-        dataTags.push(['enc', 'nip44-self']);
-    }
-    const dataEvent = finalizeEvent(
-        {
-            kind: PLAN_DATA_KIND,
-            created_at: now,
-            tags: dataTags,
-            content: dataContent,
-        },
-        sk,
-    );
-
-    // Index event (kind 30078) — metadata + pointer to data event
-    const indexTags: string[][] = [
-        ['d', name],
-        ['v', String(XIVPLAN_FORMAT_VERSION)],
-        ['e', dataEvent.id],
-    ];
-    if (visibility === 'private') {
-        indexTags.push(['enc', 'nip44-self']);
-    }
-
-    const indexEvent = finalizeEvent(
-        {
-            kind: PLAN_KIND,
-            created_at: now,
-            tags: indexTags,
-            content: '',
-        },
-        sk,
-    );
-
+/** Publishes a data+index event pair and verifies the index landed via a relay round-trip. */
+async function publishEventPair(pk: string, planId: string, dataEvent: NostrEvent, indexEvent: NostrEvent): Promise<void> {
     _lastPublishedEvents = { index: indexEvent, data: dataEvent };
 
     // Publish both events in parallel — data first so it's available when index arrives
@@ -348,7 +352,7 @@ export async function publishPlan(
         throw new Error('Could not publish — no relays responded. Check your internet connection and try again.');
     }
 
-    const stored = await fanGet({ kinds: [PLAN_KIND], authors: [pk], '#d': [name] });
+    const stored = await fanGet({ kinds: [PLAN_KIND], authors: [pk], '#d': [planId] });
 
     if (!stored) {
         throw new Error('Verification failed — the plan was not found on any relay after publishing.');
@@ -359,20 +363,161 @@ export async function publishPlan(
                 'If you have multiple tabs open, close the others and try again.',
         );
     }
+}
 
-    // Optimistically update the vault cache so the plan appears immediately in the list
-    // without needing a relay round-trip to re-fetch what we just published.
+/**
+ * Optimistically updates the vault cache so a just-published/renamed plan appears immediately
+ * in the list without needing a relay round-trip to re-fetch what was just published.
+ */
+function upsertVaultCacheEntry(pk: string, entry: NostrPlanInfo): void {
     const existing = _vaultCache.get(pk);
     if (existing) {
-        const newEntry: NostrPlanInfo = { dtag: name, publishedAt: new Date(now * 1000), visibility };
-        const filtered = existing.plans.filter((p) => p.dtag !== name);
-        const merged = [newEntry, ...filtered].slice(0, VAULT_PAGE_SIZE);
-        _vaultCache.set(pk, { plans: merged, hasMore: existing.hasMore, fetchedAt: Date.now() });
+        // No slicing to VAULT_PAGE_SIZE here — the cache holds everything loaded so far (which
+        // may span multiple "Load more" pages), not just the first page.
+        const filtered = existing.plans.filter((p) => p.id !== entry.id);
+        _vaultCache.set(pk, { plans: [entry, ...filtered], hasMore: existing.hasMore, fetchedAt: Date.now() });
         _saveVaultCache();
     } else {
         invalidateVaultCache(pk);
     }
-    return { type: 'nostr', name, pubkey: pk, visibility };
+}
+
+function visibilityFromTags(tags: string[][]): 'public' | 'private' {
+    return tags.some((t) => t[0] === 'enc') ? 'private' : 'public';
+}
+
+export async function publishPlan(
+    scene: Scene,
+    name: string,
+    visibility: 'public' | 'private',
+    id?: string,
+): Promise<NostrFileSource> {
+    const sk = await getOrCreateSecretKey();
+    const pk = getPublicKey(sk);
+    const now = Math.floor(Date.now() / 1000);
+    const planId = id ?? randomPlanId();
+
+    const planJson = sceneToJson(scene);
+
+    // Encrypt content for private plans (NIP-44 self-encryption — only this key can decrypt)
+    let dataContent: string;
+    if (visibility === 'private') {
+        const convKey = nip44.getConversationKey(sk, pk);
+        dataContent = nip44.encrypt(planJson, convKey);
+    } else {
+        dataContent = planJson;
+    }
+
+    // Data event (kind 30079) — full plan content, self-describing visibility via enc tag
+    const dataTags: string[][] = [
+        ['d', planId],
+        ['name', name],
+        ['v', String(XIVPLAN_FORMAT_VERSION)],
+    ];
+    if (visibility === 'private') {
+        dataTags.push(['enc', 'nip44-self']);
+    }
+    const dataEvent = finalizeEvent(
+        {
+            kind: PLAN_DATA_KIND,
+            created_at: now,
+            tags: dataTags,
+            content: dataContent,
+        },
+        sk,
+    );
+
+    // Index event (kind 30078) — metadata + pointer to data event
+    const indexTags: string[][] = [
+        ['d', planId],
+        ['name', name],
+        ['v', String(XIVPLAN_FORMAT_VERSION)],
+        ['e', dataEvent.id],
+    ];
+    if (visibility === 'private') {
+        indexTags.push(['enc', 'nip44-self']);
+    }
+
+    const indexEvent = finalizeEvent(
+        {
+            kind: PLAN_KIND,
+            created_at: now,
+            tags: indexTags,
+            content: '',
+        },
+        sk,
+    );
+
+    await publishEventPair(pk, planId, dataEvent, indexEvent);
+
+    upsertVaultCacheEntry(pk, { id: planId, name, publishedAt: new Date(now * 1000), visibility });
+
+    return { type: 'nostr', id: planId, name, pubkey: pk, visibility };
+}
+
+// ── Rename ────────────────────────────────────────────────────────────────────
+
+/**
+ * Republishes a plan's metadata under a new display name and/or access level, keeping the same
+ * id/d-tag/content. Re-encrypts or decrypts the content only when the access level actually
+ * changes — otherwise the existing (possibly encrypted) data is reused byte-for-byte.
+ */
+export async function renamePlan(
+    id: string,
+    newName: string,
+    newVisibility: 'public' | 'private',
+): Promise<NostrPlanInfo> {
+    const sk = await getOrCreateSecretKey();
+    const pk = getPublicKey(sk);
+    const now = Math.floor(Date.now() / 1000);
+
+    const existingData = await fanGet({ kinds: [PLAN_DATA_KIND], authors: [pk], '#d': [id] });
+    if (!existingData) {
+        throw new Error(`Plan not found on any relay — cannot rename.`);
+    }
+
+    const version = existingData.tags.find((t) => t[0] === 'v')?.[1] ?? String(XIVPLAN_FORMAT_VERSION);
+    const currentVisibility = visibilityFromTags(existingData.tags);
+
+    let content = existingData.content;
+    if (newVisibility !== currentVisibility) {
+        const convKey = nip44.getConversationKey(sk, pk);
+        content = currentVisibility === 'private' ? nip44.decrypt(content, convKey) : nip44.encrypt(content, convKey);
+    }
+
+    const dataTags: string[][] = [['d', id], ['name', newName], ['v', version]];
+    if (newVisibility === 'private') {
+        dataTags.push(['enc', 'nip44-self']);
+    }
+    const dataEvent = finalizeEvent(
+        {
+            kind: PLAN_DATA_KIND,
+            created_at: now,
+            tags: dataTags,
+            content,
+        },
+        sk,
+    );
+
+    const indexTags: string[][] = [['d', id], ['name', newName], ['v', version], ['e', dataEvent.id]];
+    if (newVisibility === 'private') {
+        indexTags.push(['enc', 'nip44-self']);
+    }
+    const indexEvent = finalizeEvent(
+        {
+            kind: PLAN_KIND,
+            created_at: now,
+            tags: indexTags,
+            content: '',
+        },
+        sk,
+    );
+
+    await publishEventPair(pk, id, dataEvent, indexEvent);
+
+    const entry: NostrPlanInfo = { id, name: newName, publishedAt: new Date(now * 1000), visibility: newVisibility };
+    upsertVaultCacheEntry(pk, entry);
+    return entry;
 }
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -380,13 +525,16 @@ export async function publishPlan(
 export interface FetchPlanResult {
     scene: Scene;
     visibility: 'public' | 'private';
+    name: string;
 }
 
-export async function fetchPlan(pubkey: string, name: string): Promise<FetchPlanResult> {
-    // Fetch data event directly by dtag — kind 30079 is a NIP-33 parameterized replaceable event,
+export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanResult> {
+    // Fetch data event directly by d-tag — kind 30079 is a NIP-33 parameterized replaceable event,
     // so the relay always returns the latest version. No index round-trip needed for new plans.
-    const dataEvent = await fanGet({ kinds: [PLAN_DATA_KIND], authors: [pubkey], '#d': [name] });
-    if (!dataEvent) throw new Error(`Plan "${name}" not found on any relay.`);
+    const dataEvent = await fanGet({ kinds: [PLAN_DATA_KIND], authors: [pubkey], '#d': [id] });
+    if (!dataEvent) throw new Error(`Plan not found on any relay.`);
+
+    const name = dataEvent.tags.find((t) => t[0] === 'name')?.[1] ?? id;
 
     // Visibility from enc tag on data event (new format, added alongside the enc tag on the index).
     // Older plans lack enc on data — for those, NIP-44 ciphertext is not valid JSON, so sniff the
@@ -423,13 +571,13 @@ export async function fetchPlan(pubkey: string, name: string): Promise<FetchPlan
         }
     }
 
-    return { scene: jsonToScene(content), visibility };
+    return { scene: jsonToScene(content), visibility, name };
 }
 
 // ── Delete (NIP-09) ───────────────────────────────────────────────────────────
 
 /** Sends a kind 5 deletion request for both the index and data events. */
-export async function deletePlan(dtag: string): Promise<void> {
+export async function deletePlan(id: string): Promise<void> {
     const sk = await getOrCreateSecretKey();
     const pk = getPublicKey(sk);
 
@@ -438,8 +586,8 @@ export async function deletePlan(dtag: string): Promise<void> {
             kind: 5,
             created_at: Math.floor(Date.now() / 1000),
             tags: [
-                ['a', `${PLAN_KIND}:${pk}:${dtag}`], // index event
-                ['a', `${PLAN_DATA_KIND}:${pk}:${dtag}`], // data event
+                ['a', `${PLAN_KIND}:${pk}:${id}`], // index event
+                ['a', `${PLAN_DATA_KIND}:${pk}:${id}`], // data event
             ],
             content: '',
         },
@@ -453,28 +601,29 @@ export async function deletePlan(dtag: string): Promise<void> {
 // ── Duplicate ─────────────────────────────────────────────────────────────────
 
 /**
- * Fetch a plan and republish it under a new name in the current user's vault.
+ * Fetch a plan and republish it under a new name and a fresh id in the current user's vault.
  * Works for own private plans and other users' public plans.
  * Fails if the source plan is private and not owned by the current key.
  */
 export async function duplicatePlan(
     sourcePubkey: string,
-    sourceDtag: string,
+    sourceId: string,
     newName: string,
 ): Promise<NostrFileSource> {
-    const { scene, visibility } = await fetchPlan(sourcePubkey, sourceDtag);
+    const { scene, visibility } = await fetchPlan(sourcePubkey, sourceId);
     return publishPlan(scene, newName, visibility);
 }
 
 // ── Vault listing ─────────────────────────────────────────────────────────────
 
 export interface NostrPlanInfo {
-    dtag: string;
+    id: string;
+    name: string;
     publishedAt: Date;
     visibility: 'public' | 'private';
 }
 
-const VAULT_PAGE_SIZE = 5;
+const VAULT_PAGE_SIZE = 20;
 
 interface VaultCachePage {
     plans: NostrPlanInfo[];
@@ -486,7 +635,7 @@ const VAULT_CACHE_TTL = 5 * 60 * 1000;
 const VAULT_CACHE_STORAGE_KEY = 'xivplan:vault-cache';
 
 interface StoredVaultCachePage {
-    plans: Array<{ dtag: string; publishedAt: number; visibility: 'public' | 'private' }>;
+    plans: Array<{ id: string; name: string; publishedAt: number; visibility: 'public' | 'private' }>;
     hasMore: boolean;
     fetchedAt: number;
 }
@@ -501,7 +650,8 @@ function _loadVaultCache(): Map<string, VaultCachePage> {
                 pubkey,
                 {
                     plans: page.plans.map((p) => ({
-                        dtag: p.dtag,
+                        id: p.id,
+                        name: p.name,
                         publishedAt: new Date(p.publishedAt),
                         visibility: p.visibility,
                     })),
@@ -521,7 +671,8 @@ function _saveVaultCache(): void {
         for (const [pubkey, page] of _vaultCache.entries()) {
             stored[pubkey] = {
                 plans: page.plans.map((p) => ({
-                    dtag: p.dtag,
+                    id: p.id,
+                    name: p.name,
                     publishedAt: p.publishedAt.getTime(),
                     visibility: p.visibility,
                 })),
@@ -552,9 +703,9 @@ export function invalidateVaultCache(pubkey?: string): void {
  */
 export async function listPlans(
     pubkey: string,
-    opts: { until?: number; dtag?: string } = {},
+    opts: { until?: number; id?: string } = {},
 ): Promise<{ plans: NostrPlanInfo[]; hasMore: boolean; cached: boolean; stale: boolean }> {
-    const isFirstPage = opts.until === undefined && !opts.dtag;
+    const isFirstPage = opts.until === undefined && !opts.id;
 
     if (isFirstPage) {
         const cached = _vaultCache.get(pubkey);
@@ -564,13 +715,19 @@ export async function listPlans(
         }
     }
 
-    const fetchLimit = VAULT_PAGE_SIZE + 1;
+    // Relays apply `limit` before fanQuery's cross-relay dedup, and per-relay storage of
+    // superseded replaceable-event versions isn't guaranteed to be purged promptly — a relay's
+    // own top-N-by-recency slice can include stale copies of plans already counted elsewhere,
+    // silently shrinking the deduped result below what's actually available. Requesting well
+    // beyond one page's worth gives dedup enough headroom to still surface a full page (and an
+    // accurate hasMore) even when some of what came back turns out to be duplicates.
+    const fetchLimit = (VAULT_PAGE_SIZE + 1) * 4;
     const events = await fanQuery({
         kinds: [PLAN_KIND],
         authors: [pubkey],
         limit: fetchLimit,
         ...(opts.until !== undefined && { until: opts.until }),
-        ...(opts.dtag && { '#d': [opts.dtag] }),
+        ...(opts.id && { '#d': [opts.id] }),
     });
 
     const result = buildPage(events);
@@ -578,6 +735,21 @@ export async function listPlans(
     if (isFirstPage) {
         _vaultCache.set(pubkey, { ...result, fetchedAt: Date.now() });
         _saveVaultCache();
+    } else if (!opts.id) {
+        // "Load more" — extend the cached list (keeping the first page's fetchedAt for TTL
+        // purposes) so a later remount/reload restores everything already loaded instead of
+        // snapping back to just the first page.
+        const existing = _vaultCache.get(pubkey);
+        if (existing) {
+            const seen = new Set(existing.plans.map((p) => p.id));
+            const appended = result.plans.filter((p) => !seen.has(p.id));
+            _vaultCache.set(pubkey, {
+                plans: [...existing.plans, ...appended],
+                hasMore: result.hasMore,
+                fetchedAt: existing.fetchedAt,
+            });
+            _saveVaultCache();
+        }
     }
 
     return { ...result, cached: false, stale: false };
@@ -585,7 +757,7 @@ export async function listPlans(
 
 /** Convenience wrapper — lists the current user's own plans. */
 export async function listOwnPlans(
-    opts: { until?: number; dtag?: string } = {},
+    opts: { until?: number; id?: string } = {},
 ): Promise<{ plans: NostrPlanInfo[]; hasMore: boolean; cached: boolean }> {
     return listPlans(await getNostrPubkey(), opts);
 }
@@ -595,12 +767,16 @@ function buildPage(events: NostrEvent[]): { plans: NostrPlanInfo[]; hasMore: boo
     const hasMore = events.length > VAULT_PAGE_SIZE;
     const page = events.slice(0, VAULT_PAGE_SIZE);
     const plans = page
-        .map((e) => ({
-            dtag: e.tags.find((t) => t[0] === 'd')?.[1] ?? '',
-            publishedAt: new Date(e.created_at * 1000),
-            visibility: (e.tags.some((t) => t[0] === 'enc') ? 'private' : 'public') as 'public' | 'private',
-        }))
-        .filter((p) => p.dtag);
+        .map((e) => {
+            const id = e.tags.find((t) => t[0] === 'd')?.[1] ?? '';
+            return {
+                id,
+                name: e.tags.find((t) => t[0] === 'name')?.[1] ?? id,
+                publishedAt: new Date(e.created_at * 1000),
+                visibility: visibilityFromTags(e.tags),
+            };
+        })
+        .filter((p) => p.id);
     return { plans, hasMore };
 }
 
@@ -609,18 +785,21 @@ function buildPage(events: NostrEvent[]): { plans: NostrPlanInfo[]; hasMore: boo
 let _cacheKey = '';
 let _cachedPromise: Promise<Scene | undefined> | undefined;
 let _cachedVisibility: 'public' | 'private' | undefined;
+let _cachedName: string | undefined;
 let _cachedError: unknown;
 
-export function getNostrFetchPromise(pubkey: string, dtag: string): Promise<Scene | undefined> {
-    const key = `${pubkey}|${dtag}`;
+export function getNostrFetchPromise(pubkey: string, id: string): Promise<Scene | undefined> {
+    const key = `${pubkey}|${id}`;
     if (key === _cacheKey && _cachedPromise) return _cachedPromise;
 
     _cacheKey = key;
     _cachedError = undefined;
     _cachedVisibility = undefined;
-    _cachedPromise = fetchPlan(pubkey, dtag)
+    _cachedName = undefined;
+    _cachedPromise = fetchPlan(pubkey, id)
         .then((result) => {
             _cachedVisibility = result.visibility;
+            _cachedName = result.name;
             return result.scene;
         })
         .catch((ex) => {
@@ -638,4 +817,8 @@ export function getNostrFetchError(): unknown {
 
 export function getNostrFetchedVisibility(): 'public' | 'private' | undefined {
     return _cachedVisibility;
+}
+
+export function getNostrFetchedName(): string | undefined {
+    return _cachedName;
 }

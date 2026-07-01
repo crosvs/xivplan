@@ -7,11 +7,8 @@ import {
     DialogTitle,
     DialogTrigger,
     Field,
-    Input,
     MessageBar,
     MessageBarBody,
-    Radio,
-    RadioGroup,
     Spinner,
     Tab,
     TabList,
@@ -23,7 +20,7 @@ import {
     useToastController,
 } from '@fluentui/react-components';
 import { CopyRegular, ShareRegular } from '@fluentui/react-icons';
-import React, { KeyboardEvent, ReactNode, useState } from 'react';
+import React, { ReactNode, useEffect, useRef, useState } from 'react';
 import { HtmlPortalNode, InPortal, OutPortal, createHtmlPortalNode } from 'react-reverse-portal';
 import { useAsync, useAsyncFn } from 'react-use';
 import { CollapsableToolbarButton } from '../CollapsableToolbarButton';
@@ -34,9 +31,9 @@ import { useScene, useSetSource } from '../SceneProvider';
 import { sceneToText } from '../file';
 import type { Scene } from '../scene';
 import { useIsDirty, useSetSavedState } from '../useIsDirty';
-import { removeFileExtension } from '../util';
-import { getNostrPubkey, getNostrShareUrl, publishPlan, sanitizePlanName } from './nostr';
+import { getNostrPubkey, getNostrShareUrl, NostrPlanInfo, publishPlan } from './nostr';
 import { KeySection } from './FileDialogNostr';
+import { NostrVaultList, getPublishActionLabel } from './NostrVaultList';
 import { RelayPublishList } from './RelayPublishList';
 import { RelayStatusDot } from './RelayStatusDot';
 import { useRelayStatus } from './useRelayStatus';
@@ -153,45 +150,84 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
     const relayStatus = useRelayStatus();
     const { dispatchToast } = useToastController();
     const ownPubkeyState = useAsync(getNostrPubkey);
+    const ownPubkey = ownPubkeyState.value;
 
-    const [name, setName] = useState(() => sanitizePlanName(removeFileExtension(source?.name ?? '')));
+    const [newName, setNewName] = useState('');
+    const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+    const [selectedPlan, setSelectedPlan] = useState<NostrPlanInfo | undefined>(undefined);
+    const [publishedUrl, setPublishedUrl] = useState('');
+
+    // getNostrPubkey() resolves asynchronously (reads the key from IDB), so we don't yet know
+    // whether the open plan is the user's own on first render — pre-select it once the pubkey
+    // comparison becomes possible, but only the first time, so it doesn't clobber a selection the
+    // user already made meanwhile.
+    const didPreselectRef = useRef(false);
+    useEffect(() => {
+        if (didPreselectRef.current || ownPubkey === undefined) return;
+        didPreselectRef.current = true;
+        if (source?.type === 'nostr' && source.pubkey === ownPubkey) {
+            setSelectedId(source.id);
+            setNewName(source.name);
+            setSelectedPlan({
+                id: source.id,
+                name: source.name,
+                publishedAt: new Date(),
+                visibility: source.visibility ?? 'public',
+            });
+        }
+    }, [ownPubkey, source]);
     const [visibility, setVisibility] = useState<'public' | 'private'>(() =>
         isNostr && source.visibility === 'private' ? 'private' : 'public',
     );
-    const [publishedUrl, setPublishedUrl] = useState<string>('');
+    const [refreshToken, setRefreshToken] = useState(0);
 
-    const isOwnPlan = isNostr && ownPubkeyState.value !== undefined && ownPubkeyState.value === source.pubkey;
+    // The name field doubles as an inline rename for the selected existing plan (see
+    // NostrVaultList's renameSelectedInline) — whatever's typed here is what gets published.
+    const shareUrl = ownPubkey && selectedId ? getNostrShareUrl(ownPubkey, selectedId) : '';
+    const currentOpenId = isNostr ? source.id : undefined;
+    const actionLabel = getPublishActionLabel(selectedId, currentOpenId);
+    const nameChanged = selectedPlan !== undefined && newName.trim() !== selectedPlan.name;
+    const visibilityChanged = selectedPlan !== undefined && visibility !== selectedPlan.visibility;
 
-    // Existing plan URL (before any publish in this session) or post-publish URL
-    const shareUrl = publishedUrl || (isNostr ? getNostrShareUrl(source.pubkey, source.name) : '');
-    const canPublish = !!name.trim() && relayStatus.anyConnected;
+    // Nothing pending to upload only when the selection is exactly the plan already open and
+    // published, with no unsaved edits, no rename, and no access change pending. Every other case
+    // (new plan, a different existing plan picked, dirty, renamed, or access changed) has
+    // something meaningful to publish.
+    const targetIsCurrentPublishedSource = selectedId !== undefined && selectedId === currentOpenId;
+    const canUpload =
+        !!newName.trim() &&
+        relayStatus.anyConnected &&
+        (!targetIsCurrentPublishedSource || isDirty || nameChanged || visibilityChanged);
+    const canCopyLink = !!shareUrl;
 
     const [publishState, publish] = useAsyncFn(async () => {
-        const nostrSource = await publishPlan(scene, name.trim(), visibility);
-        const url = getNostrShareUrl(nostrSource.pubkey, nostrSource.name);
+        if (!canUpload) return;
+        const nostrSource = await publishPlan(scene, newName.trim(), visibility, selectedId);
+        const url = getNostrShareUrl(nostrSource.pubkey, nostrSource.id);
         history.replaceState(null, '', url);
         setSource(nostrSource);
         setSavedState(scene);
+        setSelectedId(nostrSource.id);
+        setSelectedPlan({
+            id: nostrSource.id,
+            name: nostrSource.name,
+            publishedAt: new Date(),
+            visibility: nostrSource.visibility ?? visibility,
+        });
+        setRefreshToken((t) => t + 1);
         setPublishedUrl(url);
-    }, [scene, name, visibility, setSource, setSavedState]);
+    }, [scene, newName, visibility, selectedId, canUpload, setSource, setSavedState]);
 
     const copyUrl = async () => {
-        await navigator.clipboard.writeText(shareUrl);
+        await navigator.clipboard.writeText(publishedUrl || shareUrl);
         dispatchToast(<CopySuccessToast />, { intent: 'success' });
-    };
-
-    const onKeyUp = (e: KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter' && canPublish && !publishState.loading) {
-            e.preventDefault();
-            publish();
-        }
     };
 
     return (
         <>
-            <KeySection />
+            {!publishedUrl && (<KeySection />)}
 
-            {isDirty && (
+            {!publishedUrl && isDirty && (
                 <MessageBar intent="warning" className={classes.dirtyWarning}>
                     <MessageBarBody>
                         {isNostr
@@ -201,49 +237,49 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
                 </MessageBar>
             )}
 
-            {publishedUrl && (
-                <MessageBar intent="success" className={classes.dirtyWarning}>
-                    <MessageBarBody>Published to Nostr.</MessageBarBody>
-                </MessageBar>
-            )}
-
-            <Field label="Plan name" hint="Letters, numbers, spaces, hyphens, and underscores only.">
-                <Input
-                    value={name}
-                    placeholder="e.g. p1-progression-week1"
-                    onChange={(_, d) => setName(sanitizePlanName(d.value))}
-                    onKeyUp={onKeyUp}
+            {!publishedUrl && (
+                <NostrVaultList
+                    ownVaultOnly
+                    showPublishAsNew
+                    renameSelectedInline
+                    newPlanName={newName}
+                    onNewPlanNameChange={setNewName}
+                    visibility={visibility}
+                    onVisibilityChange={setVisibility}
+                    selectedId={selectedId}
+                    onSelectedChange={(item) => {
+                        setSelectedPlan(item);
+                        setSelectedId(item?.id);
+                        if (item) {
+                            setVisibility(item.visibility);
+                            setNewName(item.name);
+                        } else {
+                            setNewName('');
+                        }
+                    }}
+                    refreshToken={refreshToken}
+                    onSubmit={publish}
                     disabled={publishState.loading}
-                    autoFocus={!isNostr}
                 />
-            </Field>
-            <Field label="Visibility">
-                <RadioGroup
-                    value={visibility}
-                    onChange={(_, d) => setVisibility(d.value as 'public' | 'private')}
-                    layout="horizontal"
-                    disabled={publishState.loading}
-                >
-                    <Radio value="public" label="Public" />
-                    <Radio value="private" label="Private" />
-                </RadioGroup>
-            </Field>
-            {visibility === 'private' && (
-                <p className={classes.hint}>Content is encrypted — only you (with your key) can open this plan.</p>
-            )}
-            {isOwnPlan && !publishedUrl && (
-                <p className={classes.hint}>
-                    Publishing with the same name overwrites the previous version — the share URL stays the same.
-                </p>
             )}
 
-            {shareUrl && (
+            {!publishedUrl && shareUrl && (
                 <Field label="Nostr link">
                     <Textarea value={shareUrl} contentEditable={false} appearance="filled-darker" rows={3} />
                 </Field>
             )}
 
-            {publishedUrl && <RelayPublishList />}
+            {publishedUrl && (
+                <div className={classes.successBlock}>
+                    <MessageBar intent="success">
+                        <MessageBarBody>Published to Nostr.</MessageBarBody>
+                    </MessageBar>
+                    <Field label="Share link">
+                        <Textarea value={publishedUrl} contentEditable={false} appearance="filled-darker" rows={3} />
+                    </Field>
+                    <RelayPublishList />
+                </div>
+            )}
 
             {publishState.error && (
                 <MessageBar intent="error" className={classes.dirtyWarning}>
@@ -253,23 +289,39 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
 
             <InPortal node={actions}>
                 <DialogActions fluid>
-                    {shareUrl && (
-                        <Button icon={<CopyRegular />} onClick={copyUrl} style={{ marginRight: 'auto' }}>
-                            Copy link
-                        </Button>
+                    {publishedUrl ? (
+                        <>
+                            <Button icon={<CopyRegular />} onClick={copyUrl} style={{ marginRight: 'auto' }}>
+                                Copy link
+                            </Button>
+                            <DialogTrigger disableButtonEnhancement>
+                                <Button appearance="primary">Done</Button>
+                            </DialogTrigger>
+                        </>
+                    ) : (
+                        <>
+                            <RelayStatusDot status={relayStatus} style={{ marginRight: 'auto' }} />
+                            <Button
+                                appearance="primary"
+                                disabled={!canUpload || publishState.loading}
+                                icon={publishState.loading ? <Spinner size="tiny" /> : undefined}
+                                onClick={publish}
+                            >
+                                {publishState.loading ? 'Uploading…' : actionLabel}
+                            </Button>
+                            <Button
+                                appearance="primary"
+                                icon={<CopyRegular />}
+                                disabled={!canCopyLink}
+                                onClick={copyUrl}
+                            >
+                                Copy share link
+                            </Button>
+                            <DialogTrigger disableButtonEnhancement>
+                                <Button>Close</Button>
+                            </DialogTrigger>
+                        </>
                     )}
-                    <RelayStatusDot status={relayStatus} style={{ marginRight: tokens.spacingHorizontalXS }} />
-                    <Button
-                        appearance="primary"
-                        disabled={!canPublish || publishState.loading}
-                        icon={publishState.loading ? <Spinner size="tiny" /> : undefined}
-                        onClick={publish}
-                    >
-                        {publishState.loading ? 'Publishing…' : isOwnPlan ? 'Update plan' : 'Publish to Nostr'}
-                    </Button>
-                    <DialogTrigger disableButtonEnhancement>
-                        <Button>Close</Button>
-                    </DialogTrigger>
                 </DialogActions>
             </InPortal>
         </>
@@ -303,6 +355,11 @@ const useStyles = makeStyles({
     },
     dirtyWarning: {
         marginBottom: tokens.spacingVerticalS,
+    },
+    successBlock: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalS,
     },
     hint: {
         color: tokens.colorNeutralForeground3,
