@@ -19,7 +19,7 @@ import {
     SaveEditRegular,
     SaveRegular,
 } from '@fluentui/react-icons';
-import React, { ReactElement, useContext, useEffect, useRef, useState } from 'react';
+import React, { ReactElement, useContext, useRef, useState } from 'react';
 import { InPortal } from 'react-reverse-portal';
 import { CollapsableSplitButton, CollapsableToolbarButton } from './CollapsableToolbarButton';
 import { FileSource, useScene, useSceneUndoRedoPossible, useSetSource } from './SceneProvider';
@@ -30,7 +30,8 @@ import { saveFile } from './file';
 import { OpenDialog, SaveAsDialog } from './file/FileDialog';
 import { ShareDialogButton } from './file/ShareDialogButton';
 import { downloadScene, getBlobSource } from './file/blob';
-import { getNostrPubkey, publishPlan } from './file/nostr';
+import { publishPlan } from './file/nostr';
+import { useNostrPubkey } from './file/useNostrPubkey';
 import { DialogOpenContext } from './useCloseDialog';
 import { useCancelConnectionSelection } from './useEditMode';
 import { useHotkeys } from './useHotkeys';
@@ -145,11 +146,9 @@ const SaveButton: React.FC = () => {
     const { canonicalScene, source } = useScene();
     const setSource = useSetSource();
 
-    // Load own pubkey from IDB to determine whether a nostr plan belongs to us.
-    const [ownPubkey, setOwnPubkey] = useState<string | undefined>();
-    useEffect(() => {
-        getNostrPubkey().then(setOwnPubkey);
-    }, []);
+    // Reactive — determines whether a nostr plan belongs to us, and updates in place if the
+    // signing key changes while this button is on screen.
+    const ownPubkey = useNostrPubkey();
 
     const { type, text, icon, disabled } = getSaveButtonState(source, isDirty, ownPubkey);
 

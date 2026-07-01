@@ -27,22 +27,23 @@ import {
 } from '@fluentui/react-icons';
 import React, { useRef, useState } from 'react';
 import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
-import { useAsync, useAsyncFn } from 'react-use';
+import { useAsyncFn } from 'react-use';
 import { RelayPublishList } from './RelayPublishList';
 import { RelayStatusDot } from './RelayStatusDot';
 import { useRelayStatus } from './useRelayStatus';
+import { useNostrPubkey } from './useNostrPubkey';
 import { useLoadScene, useScene, useSetSource } from '../SceneProvider';
 import { useCloseDialog } from '../useCloseDialog';
 import { useIsDirty, useSetSavedState } from '../useIsDirty';
 import { useConfirmUnsavedChanges } from './confirm';
-import { NostrVaultList, getPublishActionLabel } from './NostrVaultList';
+import { NostrVaultList } from './NostrVaultList';
 import {
     NostrPlanInfo,
     exportSecretKeyBlob,
     fetchPlan,
     generateNewKey,
-    getNostrPubkey,
     getNostrShareUrl,
+    getPublishActionLabel,
     importSecretKey,
     publishPlan,
     pubkeyToNpub,
@@ -93,14 +94,11 @@ export const KeySection: React.FC = () => {
     const [importError, setImportError] = useState('');
     const [showNewKeyConfirm, setShowNewKeyConfirm] = useState(false);
     const [keySaved, setKeySaved] = useState(false);
-    const isDirty = useIsDirty();
-    const [confirmUnsavedChanges, renderUnsavedChangesModal] = useConfirmUnsavedChanges();
 
-    const pubkeyState = useAsync(getNostrPubkey);
+    const pubkey = useNostrPubkey();
 
     const saveKey = async () => {
         const blob = await exportSecretKeyBlob();
-        const pubkey = pubkeyState.value;
         const npubPrefix = pubkey ? pubkeyToNpub(pubkey).slice(0, 12) : 'key';
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -110,25 +108,21 @@ export const KeySection: React.FC = () => {
         URL.revokeObjectURL(url);
     };
 
-    // Switching keys reloads the page (the simplest way to clear all key-derived state), which
-    // would silently discard any unsaved scene edits — confirm first, same as opening a different
-    // file/plan elsewhere in the app.
+    // The pubkey is reactive (useNostrPubkey), so switching keys updates every open dialog in
+    // place — no page reload, and nothing about the current scene is at risk.
     const handleImportFile = async (file: File) => {
-        if (isDirty && !(await confirmUnsavedChanges())) return;
         setImportError('');
         try {
             const text = await file.text();
             await importSecretKey(text);
-            window.location.reload();
         } catch (ex) {
             setImportError(ex instanceof Error ? ex.message : String(ex));
         }
     };
 
     const doGenerateNew = async () => {
-        if (isDirty && !(await confirmUnsavedChanges())) return;
         await generateNewKey();
-        window.location.reload();
+        setShowNewKeyConfirm(false);
     };
 
     const handleSaveInDialog = async () => {
@@ -136,7 +130,7 @@ export const KeySection: React.FC = () => {
         setKeySaved(true);
     };
 
-    const npub = pubkeyState.value ? pubkeyToNpub(pubkeyState.value) : undefined;
+    const npub = pubkey ? pubkeyToNpub(pubkey) : undefined;
     const npubShort = npub ? `${npub.slice(0, 12)}…${npub.slice(-8)}` : '…';
 
     return (
@@ -211,7 +205,6 @@ export const KeySection: React.FC = () => {
                     </DialogActions>
                 </DialogSurface>
             </Dialog>
-            {renderUnsavedChangesModal()}
         </div>
     );
 };
@@ -280,7 +273,7 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
 
     return (
         <>
-            {!publishedUrl && (<KeySection />)}
+            {!publishedUrl && <KeySection />}
 
             {!publishedUrl && (
                 <NostrVaultList
@@ -370,12 +363,12 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
     const dismissDialog = useCloseDialog();
     const [confirmUnsavedChanges, renderModal] = useConfirmUnsavedChanges();
 
-    const ownPubkeyState = useAsync(getNostrPubkey);
+    const ownPubkey = useNostrPubkey();
 
     const [selectedItem, setSelectedItem] = useState<NostrPlanInfo | undefined>(undefined);
     const [selectedPubkey, setSelectedPubkey] = useState<string | null>(null);
     const selectedIsLocked =
-        selectedItem !== undefined && selectedItem.visibility === 'private' && selectedPubkey !== ownPubkeyState.value;
+        selectedItem !== undefined && selectedItem.visibility === 'private' && selectedPubkey !== ownPubkey;
 
     const [openState, openPlan] = useAsyncFn(
         async (pubkey: string, id: string) => {

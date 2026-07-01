@@ -49,7 +49,8 @@ export const ImportFromString: React.FC<ImportFromStringProps> = ({ actions }) =
             if (url.hash.startsWith(NOSTR_PREFIX)) {
                 const rest = url.hash.slice(NOSTR_PREFIX.length);
                 const slash = rest.indexOf('/');
-                const parsed = slash > 0 ? decodeNostrUrlSegments(rest.slice(0, slash), rest.slice(slash + 1)) : undefined;
+                const parsed =
+                    slash > 0 ? decodeNostrUrlSegments(rest.slice(0, slash), rest.slice(slash + 1)) : undefined;
                 if (parsed) {
                     const { pubkey, id } = parsed;
                     setLoading(true);

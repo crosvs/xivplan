@@ -20,9 +20,9 @@ import {
     useToastController,
 } from '@fluentui/react-components';
 import { CopyRegular, ShareRegular } from '@fluentui/react-icons';
-import React, { ReactNode, useEffect, useRef, useState } from 'react';
+import React, { ReactNode, useState } from 'react';
 import { HtmlPortalNode, InPortal, OutPortal, createHtmlPortalNode } from 'react-reverse-portal';
-import { useAsync, useAsyncFn } from 'react-use';
+import { useAsyncFn } from 'react-use';
 import { CollapsableToolbarButton } from '../CollapsableToolbarButton';
 import { HotkeyBlockingDialogBody } from '../HotkeyBlockingDialogBody';
 import { TabActivity } from '../TabActivity';
@@ -31,12 +31,13 @@ import { useScene, useSetSource } from '../SceneProvider';
 import { sceneToText } from '../file';
 import type { Scene } from '../scene';
 import { useIsDirty, useSetSavedState } from '../useIsDirty';
-import { getNostrPubkey, getNostrShareUrl, NostrPlanInfo, publishPlan } from './nostr';
+import { getNostrShareUrl, getPublishActionLabel, NostrPlanInfo, publishPlan } from './nostr';
 import { KeySection } from './FileDialogNostr';
-import { NostrVaultList, getPublishActionLabel } from './NostrVaultList';
+import { NostrVaultList } from './NostrVaultList';
 import { RelayPublishList } from './RelayPublishList';
 import { RelayStatusDot } from './RelayStatusDot';
 import { useRelayStatus } from './useRelayStatus';
+import { useNostrPubkey } from './useNostrPubkey';
 import { DownloadButton } from './DownloadButton';
 
 export interface ShareDialogButtonProps {
@@ -149,8 +150,7 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
     const setSavedState = useSetSavedState();
     const relayStatus = useRelayStatus();
     const { dispatchToast } = useToastController();
-    const ownPubkeyState = useAsync(getNostrPubkey);
-    const ownPubkey = ownPubkeyState.value;
+    const ownPubkey = useNostrPubkey();
 
     const [newName, setNewName] = useState('');
     const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
@@ -160,11 +160,11 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
     // getNostrPubkey() resolves asynchronously (reads the key from IDB), so we don't yet know
     // whether the open plan is the user's own on first render — pre-select it once the pubkey
     // comparison becomes possible, but only the first time, so it doesn't clobber a selection the
-    // user already made meanwhile.
-    const didPreselectRef = useRef(false);
-    useEffect(() => {
-        if (didPreselectRef.current || ownPubkey === undefined) return;
-        didPreselectRef.current = true;
+    // user already made meanwhile. Adjusted directly during render (React's sanctioned pattern
+    // for this) rather than in an effect, to avoid an extra cascading render.
+    const [hasPreselected, setHasPreselected] = useState(false);
+    if (!hasPreselected && ownPubkey !== undefined) {
+        setHasPreselected(true);
         if (source?.type === 'nostr' && source.pubkey === ownPubkey) {
             setSelectedId(source.id);
             setNewName(source.name);
@@ -175,7 +175,7 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
                 visibility: source.visibility ?? 'public',
             });
         }
-    }, [ownPubkey, source]);
+    }
     const [visibility, setVisibility] = useState<'public' | 'private'>(() =>
         isNostr && source.visibility === 'private' ? 'private' : 'public',
     );
@@ -225,7 +225,7 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
 
     return (
         <>
-            {!publishedUrl && (<KeySection />)}
+            {!publishedUrl && <KeySection />}
 
             {!publishedUrl && isDirty && (
                 <MessageBar intent="warning" className={classes.dirtyWarning}>

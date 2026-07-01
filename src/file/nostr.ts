@@ -134,10 +134,37 @@ export async function hasStoredKey(): Promise<boolean> {
     return (await nostrStore.getItem<string>('sk')) !== null;
 }
 
+// ── Reactive pubkey ─────────────────────────────────────────────────────────────
+// Lets the UI update in place when the signing key changes (import/generate) instead of
+// requiring a full page reload — components subscribe here instead of fetching once on mount.
+
+let _cachedPubkey: string | undefined;
+const _pubkeyListeners = new Set<() => void>();
+
+export function subscribePubkey(fn: () => void): () => void {
+    _pubkeyListeners.add(fn);
+    return () => {
+        _pubkeyListeners.delete(fn);
+    };
+}
+
+export function getCachedPubkey(): string | undefined {
+    return _cachedPubkey;
+}
+
+/** (Re-)fetches the pubkey and broadcasts it to subscribers. Safe to call anytime — the initial
+ *  fetch on mount and post key-switch refreshes both go through here. */
+export async function refreshNostrPubkey(): Promise<string> {
+    _cachedPubkey = await getNostrPubkey();
+    for (const fn of _pubkeyListeners) fn();
+    return _cachedPubkey;
+}
+
 /** Replaces the stored key with a freshly generated one. Irreversible — export first. */
 export async function generateNewKey(): Promise<void> {
     const sk = generateSecretKey();
     await nostrStore.setItem('sk', bytesToHex(sk));
+    await refreshNostrPubkey();
 }
 
 /** Accepts a 64-char hex private key (contents of the exported .txt file). */
@@ -147,6 +174,7 @@ export async function importSecretKey(text: string): Promise<void> {
         throw new Error('Invalid key: expected 64 hex characters.');
     }
     await nostrStore.setItem('sk', hex);
+    await refreshNostrPubkey();
 }
 
 /** Returns a Blob containing the hex private key, suitable for saving as .txt. */
@@ -325,7 +353,12 @@ export async function retryRelay(relay: string): Promise<void> {
 }
 
 /** Publishes a data+index event pair and verifies the index landed via a relay round-trip. */
-async function publishEventPair(pk: string, planId: string, dataEvent: NostrEvent, indexEvent: NostrEvent): Promise<void> {
+async function publishEventPair(
+    pk: string,
+    planId: string,
+    dataEvent: NostrEvent,
+    indexEvent: NostrEvent,
+): Promise<void> {
     _lastPublishedEvents = { index: indexEvent, data: dataEvent };
 
     // Publish both events in parallel — data first so it's available when index arrives
@@ -455,6 +488,18 @@ export async function publishPlan(
     return { type: 'nostr', id: planId, name, pubkey: pk, visibility };
 }
 
+/**
+ * Label for a publish/save action driven by a NostrVaultList selection: "Publish" for the New
+ * row, "Update" when the selection is the plan already open, "Overwrite" for any other plan.
+ */
+export function getPublishActionLabel(
+    selectedId: string | undefined,
+    currentOpenId: string | undefined,
+): 'Publish' | 'Update' | 'Overwrite' {
+    if (!selectedId) return 'Publish';
+    return selectedId === currentOpenId ? 'Update' : 'Overwrite';
+}
+
 // ── Rename ────────────────────────────────────────────────────────────────────
 
 /**
@@ -485,7 +530,11 @@ export async function renamePlan(
         content = currentVisibility === 'private' ? nip44.decrypt(content, convKey) : nip44.encrypt(content, convKey);
     }
 
-    const dataTags: string[][] = [['d', id], ['name', newName], ['v', version]];
+    const dataTags: string[][] = [
+        ['d', id],
+        ['name', newName],
+        ['v', version],
+    ];
     if (newVisibility === 'private') {
         dataTags.push(['enc', 'nip44-self']);
     }
@@ -499,7 +548,12 @@ export async function renamePlan(
         sk,
     );
 
-    const indexTags: string[][] = [['d', id], ['name', newName], ['v', version], ['e', dataEvent.id]];
+    const indexTags: string[][] = [
+        ['d', id],
+        ['name', newName],
+        ['v', version],
+        ['e', dataEvent.id],
+    ];
     if (newVisibility === 'private') {
         indexTags.push(['enc', 'nip44-self']);
     }
@@ -605,11 +659,7 @@ export async function deletePlan(id: string): Promise<void> {
  * Works for own private plans and other users' public plans.
  * Fails if the source plan is private and not owned by the current key.
  */
-export async function duplicatePlan(
-    sourcePubkey: string,
-    sourceId: string,
-    newName: string,
-): Promise<NostrFileSource> {
+export async function duplicatePlan(sourcePubkey: string, sourceId: string, newName: string): Promise<NostrFileSource> {
     const { scene, visibility } = await fetchPlan(sourcePubkey, sourceId);
     return publishPlan(scene, newName, visibility);
 }

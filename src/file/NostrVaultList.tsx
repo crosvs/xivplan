@@ -44,12 +44,12 @@ import {
     bundleIcon,
 } from '@fluentui/react-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAsync, useAsyncFn } from 'react-use';
+import { useAsyncFn } from 'react-use';
+import { useNostrPubkey } from './useNostrPubkey';
 import {
     NostrPlanInfo,
     deletePlan,
     duplicatePlan,
-    getNostrPubkey,
     getNostrShareUrl,
     invalidateVaultCache,
     listPlans,
@@ -89,7 +89,6 @@ function useIsTruncated<T extends HTMLElement>(dep: unknown): [React.RefCallback
         const observer = new ResizeObserver(check);
         observer.observe(el);
         return () => observer.disconnect();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [check, dep]);
     return [ref, isTruncated];
 }
@@ -189,18 +188,6 @@ const useStyles = makeStyles({
     },
 });
 
-/**
- * Label for a publish/save action driven by this list's selection: "Publish" for the New row,
- * "Update" when the selection is the plan already open, "Overwrite" for any other existing plan.
- */
-export function getPublishActionLabel(
-    selectedId: string | undefined,
-    currentOpenId: string | undefined,
-): 'Publish' | 'Update' | 'Overwrite' {
-    if (!selectedId) return 'Publish';
-    return selectedId === currentOpenId ? 'Update' : 'Overwrite';
-}
-
 export interface NostrVaultListProps {
     /** Hide "browse another author" and always operate on the signed-in user's own vault. */
     ownVaultOnly?: boolean;
@@ -250,8 +237,7 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
     const classes = useStyles();
     const { dispatchToast } = useToastController();
 
-    const ownPubkeyState = useAsync(getNostrPubkey);
-    const ownPubkey = ownPubkeyState.value;
+    const ownPubkey = useNostrPubkey();
 
     // Author filter — empty means own vault; valid npub/hex/share-link switches to that author.
     // Disabled entirely when ownVaultOnly, since publishing always signs with the user's own key.
@@ -391,7 +377,12 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
         [currentPubkey, dispatchToast],
     );
 
-    const newRow: NostrPlanInfo = { id: NEW_PLAN_ID, name: newPlanName, publishedAt: new Date(0), visibility: 'public' };
+    const newRow: NostrPlanInfo = {
+        id: NEW_PLAN_ID,
+        name: newPlanName,
+        publishedAt: new Date(0),
+        visibility: 'public',
+    };
     // Rendered as its own standalone DataGridRow above the column header (see below) rather than
     // as part of the scrollable items list.
     const selectedRowId = selectedId ?? (showPublishAsNew ? NEW_PLAN_ID : undefined);
@@ -454,15 +445,15 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                 const isRenamingThis = renameSelectedInline && selectedRowId === item.id;
                 return (
                     <span className={classes.nameCell}>
-                        {isRenamingThis ? (
-                            visibilityControl
-                        ) : (
-                            item.visibility === 'private' && (
-                                <Tooltip content="Private — encrypted" relationship="label" withArrow>
-                                    <LockClosedRegular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
-                                </Tooltip>
-                            )
-                        )}
+                        {isRenamingThis
+                            ? visibilityControl
+                            : item.visibility === 'private' && (
+                                  <Tooltip content="Private — encrypted" relationship="label" withArrow>
+                                      <LockClosedRegular
+                                          style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}
+                                      />
+                                  </Tooltip>
+                              )}
                         {isRenamingThis ? (
                             <Input
                                 size="small"
@@ -532,7 +523,12 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                             </Tooltip>
                         )}
                         {isOwnVault && (
-                            <Tooltip content={`Delete ${item.name}`} appearance="inverted" relationship="label" withArrow>
+                            <Tooltip
+                                content={`Delete ${item.name}`}
+                                appearance="inverted"
+                                relationship="label"
+                                withArrow
+                            >
                                 <Button
                                     appearance="subtle"
                                     aria-label="Delete"
