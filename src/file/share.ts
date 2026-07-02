@@ -3,7 +3,13 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import { jsonToScene, sceneToText, textToScene } from '../file';
 import type { FileSource } from '../SceneProvider';
 import { Scene } from '../scene';
-import { getNostrFetchError, getNostrFetchedVisibility, getNostrFetchPromise } from './nostr';
+import {
+    decodeNostrUrlSegments,
+    getNostrFetchedName,
+    getNostrFetchedVisibility,
+    getNostrFetchError,
+    getNostrFetchPromise,
+} from './nostr';
 
 export function getShareLink(scene: Scene): string {
     const data = sceneToText(scene);
@@ -101,39 +107,42 @@ export function useSceneFromUrl(): Scene | undefined {
         return use(getFetchScenePromise(url));
     }
 
-    // Nostr share: #/nostr/<pubkey>/<dtag>
+    // Nostr share: #/nostr/<pubkey-token>/<id-token>
     if (hash.startsWith(NOSTR_PREFIX)) {
-        const rest = hash.substring(NOSTR_PREFIX.length);
-        const slash = rest.indexOf('/');
-        if (slash > 0) {
-            const pubkey = decodeURIComponent(rest.substring(0, slash));
-            const dtag = decodeURIComponent(rest.substring(slash + 1));
-            if (pubkey && dtag) {
-                return use(getNostrFetchPromise(pubkey, dtag));
-            }
+        const parsed = parseNostrHash(hash);
+        if (parsed) {
+            return use(getNostrFetchPromise(parsed.pubkey, parsed.id));
         }
     }
 
     return undefined;
 }
 
+function parseNostrHash(hash: string): { pubkey: string; id: string } | undefined {
+    const rest = hash.substring(NOSTR_PREFIX.length);
+    const slash = rest.indexOf('/');
+    if (slash <= 0) return undefined;
+    return decodeNostrUrlSegments(rest.substring(0, slash), rest.substring(slash + 1));
+}
+
 /**
- * Returns a FileSource if the URL encodes a Nostr plan (i.e. #/nostr/<pubkey>/<dtag>).
- * Purely synchronous — the pubkey and dtag are read directly from the hash.
+ * Returns a FileSource if the URL encodes a Nostr plan (i.e. #/nostr/<pubkey-token>/<id-token>).
+ * Purely synchronous — the pubkey and id are decoded directly from the hash.
  * Used by App to initialise SceneProvider with the right source on URL loads.
  */
 export function useSourceFromUrl(): FileSource | undefined {
     const { hash } = useLocation();
 
     if (hash.startsWith(NOSTR_PREFIX)) {
-        const rest = hash.substring(NOSTR_PREFIX.length);
-        const slash = rest.indexOf('/');
-        if (slash > 0) {
-            const pubkey = decodeURIComponent(rest.substring(0, slash));
-            const dtag = decodeURIComponent(rest.substring(slash + 1));
-            if (pubkey && dtag) {
-                return { type: 'nostr', name: dtag, pubkey, visibility: getNostrFetchedVisibility() };
-            }
+        const parsed = parseNostrHash(hash);
+        if (parsed) {
+            return {
+                type: 'nostr',
+                id: parsed.id,
+                name: getNostrFetchedName() ?? parsed.id,
+                pubkey: parsed.pubkey,
+                visibility: getNostrFetchedVisibility(),
+            };
         }
     }
 
