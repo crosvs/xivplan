@@ -1,17 +1,19 @@
 import { KonvaEventObject } from 'konva/lib/Node';
-import React, { Dispatch, ReactNode } from 'react';
+import React, { Dispatch, ReactNode, useRef } from 'react';
 import { omitInterconnectedObjects } from '../connections';
-import { getCanvasCoord, getSceneCoord, makeRelative } from '../coord';
+import { getCanvasCoord, getSceneCoord, makeRelative, Position } from '../coord';
+import { CrossStepSelection } from '../CrossStepContext';
 import { CursorGroup } from '../CursorGroup';
 import { EditMode } from '../editMode';
 import { moveObjectsBy } from '../groupOperations';
-import { isMoveable, MoveableObject, Scene, SceneStep, UnknownObject } from '../scene';
+import { isMoveable, MoveableObject, Scene, SceneObject, SceneStep, UnknownObject } from '../scene';
 import { SceneAction, useScene } from '../SceneProvider';
 import {
     getNewDragSelection,
     getSelectedObjects,
     selectNone,
     selectSingle,
+    useCrossStepSelection,
     useDragSelection,
     useSelection,
 } from '../selection';
@@ -28,10 +30,16 @@ export interface DraggableObjectProps {
 
 export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, children }) => {
     const [editMode] = useEditMode();
-    const { scene, step, dispatch } = useScene();
+    const { scene, step, stepIndex, dispatch } = useScene();
     const [selection, setSelection] = useSelection();
     const [dragSelection, setDragSelection] = useDragSelection();
+    const { selection: crossStepSelection } = useCrossStepSelection();
     const center = getCanvasCoord(scene, object);
+
+    // Position of the dragged object at the start of the current drag, used to
+    // compute the total start-to-end translation once the drag finishes so it
+    // can be applied to the selected objects on other (non-visible) pages.
+    const dragStartPos = useRef<Position | null>(null);
 
     const isDraggable = !object.pinned && editMode === EditMode.Normal;
 
@@ -51,6 +59,7 @@ export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, childr
         }
 
         setDragSelection(newSelection);
+        dragStartPos.current = { x: object.x, y: object.y, positionParentId: object.positionParentId };
 
         updatePosition(scene, step, object, dragSelection, e, dispatch);
     };
@@ -61,6 +70,26 @@ export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, childr
 
     const handleDragEnd = (e: KonvaEventObject<DragEvent>) => {
         updatePosition(scene, step, object, dragSelection, e, dispatch);
+
+        // Only now, once the drag is finished, apply the same start-to-end
+        // translation to the matching objects selected on other pages. Doing
+        // this on every drag-move frame would require touching every page's
+        // objects on each mouse move, which is wasted work since those pages
+        // aren't visible during the drag anyway.
+        if (dragStartPos.current) {
+            applyCrossStepDrag(
+                scene,
+                stepIndex,
+                dragSelection,
+                crossStepSelection,
+                object,
+                dragStartPos.current,
+                e,
+                dispatch,
+            );
+        }
+        dragStartPos.current = null;
+
         dispatch({ type: 'commit' });
 
         setDragSelection(selectNone());
@@ -110,4 +139,63 @@ function updatePosition(
     const value = moveObjectsBy(draggedObjects, offset);
 
     dispatch({ type: 'update', value, transient: true });
+}
+
+/**
+ * Applies the total start-to-end translation of a finished drag to the
+ * matching objects selected on other pages via the cross-step ("select
+ * similar on all pages") selection. Only runs once, at drag end, since those
+ * pages aren't visible during the drag itself.
+ */
+function applyCrossStepDrag(
+    scene: Scene,
+    currentStepIndex: number,
+    dragSelection: SceneSelection,
+    crossStepSelection: CrossStepSelection,
+    targetObject: MoveableObject & UnknownObject,
+    dragStartPos: Position,
+    e: KonvaEventObject<DragEvent>,
+    dispatch: Dispatch<SceneAction>,
+) {
+    if (crossStepSelection.size === 0) {
+        return;
+    }
+
+    // Only propagate to other pages if the objects being dragged on this page
+    // are actually part of the cross-step selection -- otherwise this is just
+    // an unrelated drag that happens to occur while a cross-step selection is
+    // active elsewhere.
+    const currentStepCrossSelection = crossStepSelection.get(currentStepIndex);
+    if (!currentStepCrossSelection || ![...dragSelection].some((id) => currentStepCrossSelection.has(id))) {
+        return;
+    }
+
+    const finalPos = makeRelative(scene, getSceneCoord(scene, e.target.position()), targetObject.positionParentId);
+    const offset = vecSub(finalPos, dragStartPos);
+
+    if (offset.x === 0 && offset.y === 0) {
+        return;
+    }
+
+    const value: SceneObject[] = [];
+    for (const [stepIdx, ids] of crossStepSelection) {
+        if (stepIdx === currentStepIndex) {
+            continue;
+        }
+
+        const otherStep = scene.steps[stepIdx];
+        if (!otherStep) {
+            continue;
+        }
+
+        const objects = omitInterconnectedObjects(
+            scene,
+            otherStep.objects.filter((o) => ids.has(o.id)).filter(isMoveable),
+        );
+        value.push(...moveObjectsBy(objects, offset));
+    }
+
+    if (value.length > 0) {
+        dispatch({ type: 'update', value, transient: true });
+    }
 }

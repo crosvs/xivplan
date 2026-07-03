@@ -345,8 +345,9 @@ function rotateObject<T extends MoveableObject>(
 
 const EditActionHandler: React.FC = () => {
     const [selection] = useSelection();
-    const { scene, step, dispatch } = useScene();
+    const { scene, step, stepIndex, dispatch } = useScene();
     const [editMode] = useEditMode();
+    const { selection: crossStep } = useCrossStepSelection();
 
     const moveCallback = (offset: Partial<Vector2d>) => (e: KeyboardEvent) => {
         if (editMode !== EditMode.Normal) {
@@ -358,6 +359,31 @@ const EditActionHandler: React.FC = () => {
             getSelectedObjects(step, selection).filter(isMoveable),
         );
         const value = moveObjectsBy(selectedObjects, offset);
+
+        // Also move the matching objects selected on other pages via the
+        // cross-step ("select similar on all pages") selection, by the same
+        // offset -- but only if the current selection is actually part of
+        // that cross-step selection.
+        const currentStepCrossSelection = crossStep.get(stepIndex);
+        const shouldPropagate =
+            currentStepCrossSelection && [...selection].some((id) => currentStepCrossSelection.has(id));
+
+        if (shouldPropagate) {
+            for (const [stepIdx, ids] of crossStep) {
+                if (stepIdx === stepIndex) {
+                    continue;
+                }
+                const otherStep = scene.steps[stepIdx];
+                if (!otherStep) {
+                    continue;
+                }
+                const otherObjects = omitInterconnectedObjects(
+                    scene,
+                    otherStep.objects.filter((o) => ids.has(o.id)).filter(isMoveable),
+                );
+                value.push(...moveObjectsBy(otherObjects, offset));
+            }
+        }
 
         dispatch({ type: 'update', value });
         e.preventDefault();
