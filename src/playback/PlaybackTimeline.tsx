@@ -61,7 +61,7 @@ export const PlaybackTimeline: React.FC<PlaybackTimelineProps> = ({ classicMode,
     const stepLabel = `Step ${currentStepIndex + 1} / ${stepCount}`;
 
     return (
-        <div className={classes.root} style={{ maxWidth: scene.arena.width + scene.arena.padding * 2 }}>
+        <div className={classes.root}>
             {/* Controls row */}
             <div className={classes.controls}>
                 <AddStepButton size="small" />
@@ -226,6 +226,8 @@ const useStyles = makeStyles({
     root: {
         display: 'flex',
         flexFlow: 'column',
+        width: '100%',
+        boxSizing: 'border-box',
         gap: tokens.spacingVerticalXS,
         padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
         borderTop: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
@@ -235,6 +237,7 @@ const useStyles = makeStyles({
     controls: {
         display: 'flex',
         flexFlow: 'row',
+        flexWrap: 'wrap',
         alignItems: 'center',
         gap: tokens.spacingHorizontalS,
     },

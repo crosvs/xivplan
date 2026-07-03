@@ -92,10 +92,8 @@ export const StepSelect: React.FC = () => {
         }
     };
 
-    const maxWidth = scene.arena.width + scene.arena.padding * 2;
-
     return (
-        <div className={classes.root} style={{ maxWidth }}>
+        <div className={classes.root}>
             <div className={classes.listWrapper}>
                 <TabList
                     size="small"
@@ -416,6 +414,7 @@ const useStyles = makeStyles({
         gridArea: 'steps',
         display: 'flex',
         flexFlow: 'row',
+        width: '100%',
         columnGap: tokens.spacingHorizontalXS,
         backgroundColor: tokens.colorNeutralBackground2,
         minWidth: MIN_STAGE_WIDTH,

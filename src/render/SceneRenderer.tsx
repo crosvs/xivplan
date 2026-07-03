@@ -14,6 +14,7 @@ import { selectNewObjects, selectNone, useCrossStepSelection, useSelection } fro
 import { UndoContext } from '../undo/undoContext';
 import { useEditMode } from '../useEditMode';
 import { usePanelDrag } from '../usePanelDrag';
+import { usePreviewMode } from '../usePreviewMode';
 import { StaticPlaybackProvider, useDisplayObjects } from '../playback/PlaybackContext';
 import { ArenaRenderer } from './ArenaRenderer';
 import { DisplayObjectsContext } from './DisplayObjectsContext';
@@ -30,7 +31,13 @@ export const SceneRenderer: React.FC = () => {
     const size = getCanvasSize(scene);
     const [stage, stageRef] = useState<Konva.Stage | null>(null);
     const [editMode] = useEditMode();
+    const [previewMode] = usePreviewMode();
     const onClickStage = (e: KonvaEventObject<MouseEvent>) => {
+        // Preview mode preserves whatever was selected when it was turned on, so
+        // clicking around the canvas while previewing shouldn't change it.
+        if (previewMode) {
+            return;
+        }
         // Clicking on nothing while selecting a connection target should keep the
         // current selection to better keep the visuals of which objects are going to
         // get connected.

@@ -19,6 +19,7 @@ import {
 } from '../selection';
 import { SceneSelection } from '../SelectionContext';
 import { useEditMode } from '../useEditMode';
+import { usePreviewMode } from '../usePreviewMode';
 import { vecSub } from '../vector';
 import { SelectableObject } from './SelectableObject';
 import { TetherTarget } from './TetherTarget';
@@ -30,6 +31,7 @@ export interface DraggableObjectProps {
 
 export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, children }) => {
     const [editMode] = useEditMode();
+    const [previewMode] = usePreviewMode();
     const { scene, step, stepIndex, dispatch } = useScene();
     const [selection, setSelection] = useSelection();
     const [dragSelection, setDragSelection] = useDragSelection();
@@ -41,7 +43,7 @@ export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, childr
     // can be applied to the selected objects on other (non-visible) pages.
     const dragStartPos = useRef<Position | null>(null);
 
-    const isDraggable = !object.pinned && editMode === EditMode.Normal;
+    const isDraggable = !object.pinned && !previewMode && editMode === EditMode.Normal;
 
     const handleDragStart = (e: KonvaEventObject<DragEvent>) => {
         let newSelection: SceneSelection;

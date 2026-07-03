@@ -1,4 +1,4 @@
-import { makeStyles, Spinner, Toaster, tokens } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, Spinner, Toaster, tokens } from '@fluentui/react-components';
 import React, { PropsWithChildren, Suspense } from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { createBrowserRouter, createRoutesFromElements, Outlet, Route, RouterProvider } from 'react-router-dom';
@@ -7,11 +7,13 @@ import { useSceneFromUrl, useSourceFromUrl } from './file/share';
 import { FileOpenPage } from './FileOpenPage';
 import { HelpProvider } from './HelpProvider';
 import { MainPage } from './MainPage';
+import { PreviewModeProvider } from './PreviewModeProvider';
 import { SceneProvider } from './SceneProvider';
 import { SiteHeader } from './SiteHeader';
 import { ThemeProvider } from './ThemeProvider';
 import { useFileLoaderDropTarget } from './useFileLoader';
 import { HotkeyScopes } from './useHotkeys';
+import { usePreviewMode } from './usePreviewMode';
 
 const useStyles = makeStyles({
     root: {
@@ -30,6 +32,16 @@ const useStyles = makeStyles({
             `,
 
         background: tokens.colorNeutralBackground3,
+    },
+    // Applied in preview mode, on top of `root`, to collapse the editor panel columns
+    // so the steps/content column fills the full width.
+    rootPreviewMode: {
+        gridTemplateColumns: '1fr',
+        gridTemplateAreas: `
+                "header"
+                "steps"
+                "content"
+            `,
     },
     header: {
         gridArea: 'header',
@@ -56,7 +68,10 @@ const BaseProviders: React.FC<PropsWithChildren> = ({ children }) => {
         <HotkeysProvider initiallyActiveScopes={[HotkeyScopes.Default, HotkeyScopes.AlwaysEnabled]}>
             <HelpProvider>
                 <SceneProvider initialScene={sceneFromUrl} initialSource={sourceFromUrl}>
-                    <DirtyProvider>{children}</DirtyProvider>
+                    {/* A plan loaded from a share URL starts in preview mode, hiding the editor panels. */}
+                    <PreviewModeProvider initialValue={!!sceneFromUrl}>
+                        <DirtyProvider>{children}</DirtyProvider>
+                    </PreviewModeProvider>
                 </SceneProvider>
             </HelpProvider>
         </HotkeysProvider>
@@ -88,11 +103,16 @@ const Layout: React.FC = () => {
 
 const Root: React.FC = () => {
     const classes = useStyles();
+    const [previewMode] = usePreviewMode();
     const { onDragOver, onDrop, renderModal } = useFileLoaderDropTarget();
 
     return (
         <>
-            <div className={classes.root} onDragOver={onDragOver} onDrop={onDrop}>
+            <div
+                className={mergeClasses(classes.root, previewMode && classes.rootPreviewMode)}
+                onDragOver={onDragOver}
+                onDrop={onDrop}
+            >
                 <Toaster position="top" />
                 <SiteHeader className={classes.header} />
                 <Outlet />

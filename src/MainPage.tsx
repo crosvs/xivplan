@@ -15,6 +15,7 @@ import { PlaybackTimeline } from './playback/PlaybackTimeline';
 import { SceneRenderer } from './render/SceneRenderer';
 import { MIN_STAGE_WIDTH } from './theme';
 import { useIsDirty } from './useIsDirty';
+import { usePreviewMode } from './usePreviewMode';
 import { removeFileExtension } from './util';
 
 export const MainPage: React.FC = () => {
@@ -63,6 +64,7 @@ const MainPageContent: React.FC = () => {
     const { setPlaybackTime, togglePlay, isPlayingRef } = usePlaybackDispatch();
     const maxStep = scene.steps.length - 1;
     const [classicMode, setClassicMode] = useState(false);
+    const [previewMode] = usePreviewMode();
 
     // stepIndexRef captures the step the reducer committed to (e.g. addStep → new step index).
     const stepIndexRef = useRef(stepIndex);
@@ -102,8 +104,7 @@ const MainPageContent: React.FC = () => {
 
             <MainToolbar />
 
-            {/* TODO: make panel collapsable */}
-            <MainPanel />
+            {!previewMode && <MainPanel />}
 
             <div className={classes.steps}>
                 {classicMode && <StepSelect />}
@@ -114,8 +115,7 @@ const MainPageContent: React.FC = () => {
                 <SceneRenderer />
             </div>
 
-            {/* TODO: make panel collapsable */}
-            <DetailsPanel />
+            {!previewMode && <DetailsPanel />}
         </>
     );
 };
@@ -142,6 +142,10 @@ const useStyles = makeStyles({
         gridArea: 'steps',
         display: 'flex',
         flexFlow: 'column',
+        // Without this, content that's wider than the column (e.g. the playback
+        // controls row on a narrow arena) can overflow into the neighboring panel
+        // instead of wrapping/clipping within this grid area.
+        overflow: 'hidden',
         minWidth: MIN_STAGE_WIDTH,
         backgroundColor: tokens.colorNeutralBackground2,
     },

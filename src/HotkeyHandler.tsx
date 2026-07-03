@@ -24,6 +24,7 @@ import {
 } from './selection';
 import { useCancelConnectionSelection, useEditMode } from './useEditMode';
 import { useHotkeyHelp, useHotkeys } from './useHotkeys';
+import { usePreviewMode } from './usePreviewMode';
 import { useTetherConfig } from './useTetherConfig';
 import { commonValue, setOrOmit } from './util';
 
@@ -98,6 +99,7 @@ const SelectionActionHandler: React.FC = () => {
     const [clipboard, setClipboard] = useState<readonly SceneObject[]>([]);
     const [selection, setSelection] = useSelection();
     const [editMode, setEditMode] = useEditMode();
+    const [previewMode] = usePreviewMode();
     const [tetherConfig, setTetherConfig] = useTetherConfig();
     const { scene, step, dispatch } = useScene();
     const stage = useStage();
@@ -107,19 +109,22 @@ const SelectionActionHandler: React.FC = () => {
         'ctrl+a',
         { category: CATEGORY_SELECTION, help: 'Select all objects' },
         (e) => {
-            if (editMode !== EditMode.Normal) {
+            if (editMode !== EditMode.Normal || previewMode) {
                 return;
             }
             setSelection(selectAll(step.objects));
             e.preventDefault();
         },
-        [setSelection, step.objects, editMode],
+        [setSelection, step.objects, editMode, previewMode],
     );
 
     useHotkeys(
         'escape',
         { category: CATEGORY_SELECTION, help: 'Unselect all, cancel tool' },
         (e) => {
+            if (previewMode) {
+                return;
+            }
             if (editMode == EditMode.SelectConnection) {
                 setEditMode(EditMode.Normal);
             } else if (selection.size || crossStep.size) {
@@ -131,14 +136,14 @@ const SelectionActionHandler: React.FC = () => {
 
             e.preventDefault();
         },
-        [selection, setSelection, crossStep, setCrossStep, editMode, setEditMode],
+        [selection, setSelection, crossStep, setCrossStep, editMode, setEditMode, previewMode],
     );
 
     useHotkeys(
         'delete',
         { category: CATEGORY_SELECTION, help: 'Delete selected objects' },
         (e) => {
-            if (!selection.size || editMode !== EditMode.Normal) {
+            if (!selection.size || editMode !== EditMode.Normal || previewMode) {
                 return;
             }
             const allIds = new Set<number>(selection);
@@ -150,7 +155,7 @@ const SelectionActionHandler: React.FC = () => {
             if (crossStep.size) setCrossStep(new Map());
             e.preventDefault();
         },
-        [selection, setSelection, crossStep, setCrossStep, dispatch, editMode],
+        [selection, setSelection, crossStep, setCrossStep, dispatch, editMode, previewMode],
     );
 
     useHotkeys(
@@ -169,7 +174,7 @@ const SelectionActionHandler: React.FC = () => {
         'ctrl+x',
         { category: CATEGORY_SELECTION, help: 'Cut selected objects' },
         (e) => {
-            if (!selection.size || editMode !== EditMode.Normal) {
+            if (!selection.size || editMode !== EditMode.Normal || previewMode) {
                 return;
             }
             setClipboard(getSelectedObjects(step, selection));
@@ -178,45 +183,45 @@ const SelectionActionHandler: React.FC = () => {
             if (crossStep.size) setCrossStep(new Map());
             e.preventDefault();
         },
-        [step, dispatch, setSelection, selection, crossStep, setCrossStep, editMode],
+        [step, dispatch, setSelection, selection, crossStep, setCrossStep, editMode, previewMode],
     );
     useHotkeys(
         'ctrl+v',
         { category: CATEGORY_SELECTION, help: 'Paste objects at mouse' },
         (e) => {
-            if (!clipboard.length || !stage || editMode !== EditMode.Normal) {
+            if (!clipboard.length || !stage || editMode !== EditMode.Normal || previewMode) {
                 return;
             }
             pasteObjects(stage, scene, step, dispatch, setSelection, clipboard);
             e.preventDefault();
         },
-        [stage, scene, step, dispatch, setSelection, clipboard, editMode],
+        [stage, scene, step, dispatch, setSelection, clipboard, editMode, previewMode],
     );
 
     useHotkeys(
         'ctrl+shift+v',
         { category: CATEGORY_SELECTION, help: 'Paste objects at original location' },
         (e) => {
-            if (!clipboard.length || !stage || editMode !== EditMode.Normal) {
+            if (!clipboard.length || !stage || editMode !== EditMode.Normal || previewMode) {
                 return;
             }
             pasteObjects(stage, scene, step, dispatch, setSelection, clipboard, false);
             e.preventDefault();
         },
-        [stage, scene, step, dispatch, setSelection, clipboard, editMode],
+        [stage, scene, step, dispatch, setSelection, clipboard, editMode, previewMode],
     );
 
     useHotkeys(
         'ctrl+d',
         { category: CATEGORY_SELECTION, help: 'Duplicate selected objects' },
         (e) => {
-            if (!selection.size || !stage || editMode !== EditMode.Normal) {
+            if (!selection.size || !stage || editMode !== EditMode.Normal || previewMode) {
                 return;
             }
             pasteObjects(stage, scene, step, dispatch, setSelection, getSelectedObjects(step, selection), false);
             e.preventDefault();
         },
-        [stage, scene, step, dispatch, selection, setSelection, editMode],
+        [stage, scene, step, dispatch, selection, setSelection, editMode, previewMode],
     );
 
     useHotkeys(
@@ -224,14 +229,14 @@ const SelectionActionHandler: React.FC = () => {
         { category: CATEGORY_SELECTION, help: 'Show/hide selected objects' },
         (e) => {
             // This will fire together with CTRL+H, so ignore it in that case.
-            if (!selection.size || e.ctrlKey) {
+            if (!selection.size || e.ctrlKey || previewMode) {
                 return;
             }
 
             toggleHide(getSelectedObjects(step, selection), dispatch);
         },
         { useKey: true },
-        [step, dispatch, selection],
+        [step, dispatch, selection, previewMode],
     );
 
     useHotkeys(
@@ -239,17 +244,20 @@ const SelectionActionHandler: React.FC = () => {
         { category: CATEGORY_SELECTION, help: 'Lock/unlock selected object positions' },
         (e) => {
             // This will fire together with CTRL+L, so ignore it in that case.
-            if (!selection.size || e.ctrlKey) {
+            if (!selection.size || e.ctrlKey || previewMode) {
                 return;
             }
 
             toggleLock(getSelectedObjects(step, selection), dispatch);
         },
         { useKey: true },
-        [step, dispatch, selection],
+        [step, dispatch, selection, previewMode],
     );
 
     const tetherCallback = (type: TetherType) => (e: KeyboardEvent) => {
+        if (previewMode) {
+            return;
+        }
         if (selection.size === 0) {
             // When nothing selected, tether hotkeys should toggle tether tool.
             if (editMode === EditMode.Tether && tetherConfig.tether === type) {
@@ -347,10 +355,11 @@ const EditActionHandler: React.FC = () => {
     const [selection] = useSelection();
     const { scene, step, stepIndex, dispatch } = useScene();
     const [editMode] = useEditMode();
+    const [previewMode] = usePreviewMode();
     const { selection: crossStep } = useCrossStepSelection();
 
     const moveCallback = (offset: Partial<Vector2d>) => (e: KeyboardEvent) => {
-        if (editMode !== EditMode.Normal) {
+        if (editMode !== EditMode.Normal || previewMode) {
             return;
         }
 
@@ -409,7 +418,7 @@ const EditActionHandler: React.FC = () => {
     useHotkeyHelp({ keys: 'shift+🡐🡑🡓🡒', category: CATEGORY_EDIT, help: 'Move object (fine)' });
 
     const rotateCallback = (offset: number) => (e: KeyboardEvent) => {
-        if (editMode !== EditMode.Normal) {
+        if (editMode !== EditMode.Normal || previewMode) {
             return;
         }
 
@@ -438,6 +447,9 @@ const EditActionHandler: React.FC = () => {
     useHotkeys('ctrl+j', { category: CATEGORY_EDIT, help: 'Rotate 180°' }, rotateCallback(180), [rotateCallback]);
 
     const orderCallback = (type: GroupMoveAction['type']) => (e: KeyboardEvent) => {
+        if (previewMode) {
+            return;
+        }
         dispatch({ type, ids: [...selection] });
         e.preventDefault();
     };
@@ -481,6 +493,7 @@ const DrawModeHandler: React.FC = () => {
 
 const StepHandler: React.FC = () => {
     const { dispatch } = useScene();
+    const [previewMode] = usePreviewMode();
     const cancelConnectionSelection = useCancelConnectionSelection();
 
     useHotkeys(
@@ -509,11 +522,14 @@ const StepHandler: React.FC = () => {
         'ctrl+enter',
         { category: CATEGORY_STEPS, help: 'Add step' },
         (e) => {
+            if (previewMode) {
+                return;
+            }
             cancelConnectionSelection();
             dispatch({ type: 'addStep' });
             e.preventDefault();
         },
-        [dispatch],
+        [dispatch, previewMode],
     );
 
     return null;

@@ -15,6 +15,7 @@ import {
     useSpotlight,
 } from '../selection';
 import { useEditMode } from '../useEditMode';
+import { usePreviewMode } from '../usePreviewMode';
 
 export interface SelectableObjectProps extends PropsWithChildren {
     object: SceneObject;
@@ -24,10 +25,11 @@ export const SelectableObject: React.FC<SelectableObjectProps> = ({ object, chil
     const [selection, setSelection] = useSelection();
     const [spotlight, setSpotlight] = useSpotlight();
     const [editMode, setEditMode] = useEditMode();
+    const [previewMode] = usePreviewMode();
     const { dispatch } = useScene();
     const isAllowedConnectionTarget = useIsAllowedConnectionTarget(object.id);
     const getUpdateConnectionIdsAction = useUpdateConnectedIdsAction();
-    const isSelectable = editMode === EditMode.Normal || editMode === EditMode.SelectConnection;
+    const isSelectable = !previewMode && (editMode === EditMode.Normal || editMode === EditMode.SelectConnection);
 
     const onClick = (e: KonvaEventObject<MouseEvent>) => {
         if (editMode == EditMode.SelectConnection) {

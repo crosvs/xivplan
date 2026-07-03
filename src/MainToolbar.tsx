@@ -15,6 +15,8 @@ import {
     ArrowRedoRegular,
     ArrowUndoRegular,
     CloudArrowUpRegular,
+    EyeOffRegular,
+    EyeRegular,
     OpenRegular,
     SaveEditRegular,
     SaveRegular,
@@ -36,6 +38,7 @@ import { DialogOpenContext } from './useCloseDialog';
 import { useCancelConnectionSelection } from './useEditMode';
 import { useHotkeys } from './useHotkeys';
 import { useIsDirty, useSetSavedState } from './useIsDirty';
+import { usePreviewMode } from './usePreviewMode';
 
 const useStyles = makeStyles({
     toolbar: {
@@ -51,6 +54,7 @@ export const MainToolbar: React.FC = () => {
     const [undoPossible, redoPossible] = useSceneUndoRedoPossible();
     const [openFileOpen, setOpenFileOpen] = useState(false);
     const cancelConnectionSelection = useCancelConnectionSelection();
+    const [previewMode, setPreviewMode] = usePreviewMode();
 
     const undo = () => {
         cancelConnectionSelection();
@@ -79,6 +83,15 @@ export const MainToolbar: React.FC = () => {
 
             <InPortal node={toolbarNode}>
                 <Toolbar className={classes.toolbar}>
+                    <CollapsableToolbarButton
+                        icon={previewMode ? <EyeOffRegular /> : <EyeRegular />}
+                        onClick={() => setPreviewMode((p) => !p)}
+                    >
+                        {previewMode ? 'Show editor' : 'Preview mode'}
+                    </CollapsableToolbarButton>
+
+                    <ToolbarDivider />
+
                     {/* <CollapsableToolbarButton icon={<NewRegular />}>New</CollapsableToolbarButton> */}
                     <CollapsableToolbarButton icon={<OpenRegular />} onClick={() => setOpenFileOpen(true)}>
                         Open

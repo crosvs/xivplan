@@ -7,6 +7,7 @@ import { useSelection, useSpotlight } from '../selection';
 import { SceneSelection } from '../SelectionContext';
 import { SELECTED_CONNECTED_PROPS, SELECTED_PROPS, SPOTLIGHT_CONNECTED_PROPS, SPOTLIGHT_PROPS } from '../theme';
 import { useEditMode } from '../useEditMode';
+import { usePreviewMode } from '../usePreviewMode';
 
 function shouldShowResizer(object: UnknownObject, selection: SceneSelection, editMode: EditMode) {
     return (
@@ -22,7 +23,13 @@ export function useHighlightProps(object: UnknownObject): ShapeConfig | undefine
     const [editMode] = useEditMode();
     const [selection] = useSelection();
     const [spotlight] = useSpotlight();
+    const [previewMode] = usePreviewMode();
     const scene = useScene().scene;
+
+    // Preview mode hides what's selected, without touching the underlying selection state.
+    if (previewMode) {
+        return undefined;
+    }
 
     // Regular selection styling takes precedence if it's the only selected object.
     if (spotlight.has(object.id) && !(selection.size === 1 && selection.has(object.id))) {
@@ -64,5 +71,6 @@ export function useOverrideProps(object: UnknownObject): ShapeConfig | undefined
 export function useShowResizer(object: UnknownObject): boolean {
     const [editMode] = useEditMode();
     const [selection] = useSelection();
-    return shouldShowResizer(object, selection, editMode);
+    const [previewMode] = usePreviewMode();
+    return !previewMode && shouldShowResizer(object, selection, editMode);
 }
