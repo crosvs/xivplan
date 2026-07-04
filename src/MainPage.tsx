@@ -132,7 +132,7 @@ const MainPageContent: React.FC = () => {
                 (isPortrait ? (
                     <PortraitPanels />
                 ) : landscapeStage === 1 ? (
-                    <CombinedPanel />
+                    <CombinedPanel maxWidth={windowWidth - MIN_STAGE_WIDTH_PX} />
                 ) : (
                     <DetailsPanel split={landscapeStage === 3} />
                 ))}

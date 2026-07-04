@@ -1,4 +1,6 @@
-import { useWindowSize } from 'react-use';
+import { useMedia, useWindowSize } from 'react-use';
+import { PANEL_WIDTH } from './panel/PanelStyles';
+import { usePreviewMode } from './usePreviewMode';
 
 /**
  * Priority collapse system for the site header, mirroring panelStages.ts's approach: rather than
@@ -14,7 +16,12 @@ import { useWindowSize } from 'react-use';
  * avoid premature collapse or overflow" is the goal, not pixel-perfect layout math.
  */
 
-const LOGO_WIDTH = 90; // "XIVPlan" at its natural (portrait, non grid-aligned) width
+// "XIVPlan"'s title block is a fixed width aligned to the left panel column below it (see
+// SiteHeader.tsx's `.title` class) only when that left panel actually exists -- in portrait mode
+// panels move below the scene instead, and in preview mode there's no panel at all, so both cases
+// shrink the title to its natural auto width instead.
+const LOGO_WIDTH_ALIGNED = PANEL_WIDTH;
+const LOGO_WIDTH_AUTO = 90;
 const CHROME_OVERHEAD = 130; // header padding + toolbar dividers + inter-item gaps
 
 interface GroupWidths {
@@ -46,9 +53,9 @@ const STAGES: readonly HeaderCollapseState[] = [
     { collapseE: true, collapseC: true, collapseD: true, collapseB: true, collapseA: true },
 ];
 
-function widthOf(state: HeaderCollapseState): number {
+function widthOf(state: HeaderCollapseState, logoWidth: number): number {
     return (
-        LOGO_WIDTH +
+        logoWidth +
         CHROME_OVERHEAD +
         (state.collapseA ? GROUP_A.collapsed : GROUP_A.expanded) +
         (state.collapseB ? GROUP_B.collapsed : GROUP_B.expanded) +
@@ -58,9 +65,9 @@ function widthOf(state: HeaderCollapseState): number {
     );
 }
 
-export function getHeaderCollapseState(availableWidth: number): HeaderCollapseState {
+export function getHeaderCollapseState(availableWidth: number, logoWidth: number): HeaderCollapseState {
     for (const stage of STAGES) {
-        if (widthOf(stage) <= availableWidth) {
+        if (widthOf(stage, logoWidth) <= availableWidth) {
             return stage;
         }
     }
@@ -69,5 +76,7 @@ export function getHeaderCollapseState(availableWidth: number): HeaderCollapseSt
 
 export function useHeaderCollapseState(): HeaderCollapseState {
     const { width } = useWindowSize();
-    return getHeaderCollapseState(width);
+    const isPortrait = useMedia('(orientation: portrait)');
+    const [previewMode] = usePreviewMode();
+    return getHeaderCollapseState(width, isPortrait || previewMode ? LOGO_WIDTH_AUTO : LOGO_WIDTH_ALIGNED);
 }
