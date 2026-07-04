@@ -3,6 +3,7 @@ import {
     Link,
     Menu,
     MenuItem,
+    MenuItemLink,
     MenuList,
     MenuPopover,
     MenuTrigger,
@@ -121,9 +122,9 @@ export const SiteHeader: React.FC<HTMLAttributes<HTMLElement>> = ({ className, .
                             <MenuItem icon={<InfoRegular />} onClick={() => setAboutOpen(true)}>
                                 About
                             </MenuItem>
-                            <MenuItem as="a" href="https://github.com/Crosvs/xivplan" target="_blank" rel="noreferrer">
+                            <MenuItemLink href="https://github.com/Crosvs/xivplan" target="_blank" rel="noreferrer">
                                 GitHub
-                            </MenuItem>
+                            </MenuItemLink>
                             <MenuItem
                                 icon={darkMode ? <WeatherMoonFilled /> : <WeatherSunnyFilled />}
                                 onClick={() => setDarkMode(!darkMode)}

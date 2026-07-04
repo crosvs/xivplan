@@ -100,14 +100,18 @@ export const RadiusObjectContainer: React.FC<RadiusObjectContainerProps> = ({
                     if (!isRadiusObject(other)) {
                         return other;
                     }
-                    const next = { ...other, radius: Math.max(MIN_RADIUS, other.radius + dRadius) };
-                    if (isRotateable(next) && dRotation !== 0) {
-                        next.rotation = clampRotation(next.rotation + dRotation);
-                    }
-                    if (isInnerRadiusObject(next) && dInnerRadius !== 0) {
-                        next.innerRadius = Math.max(MIN_RADIUS, next.innerRadius + dInnerRadius);
-                    }
-                    return next;
+                    // Scene objects are readonly, so the update has to be a single spread rather
+                    // than fields assigned after the fact.
+                    return {
+                        ...other,
+                        radius: Math.max(MIN_RADIUS, other.radius + dRadius),
+                        ...(isRotateable(other) && dRotation !== 0
+                            ? { rotation: clampRotation(other.rotation + dRotation) }
+                            : {}),
+                        ...(isInnerRadiusObject(other) && dInnerRadius !== 0
+                            ? { innerRadius: Math.max(MIN_RADIUS, other.innerRadius + dInnerRadius) }
+                            : {}),
+                    };
                 },
                 dispatch,
             );
