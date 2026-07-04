@@ -25,8 +25,7 @@ import React, { ReactElement, useContext, useRef, useState } from 'react';
 import { InPortal } from 'react-reverse-portal';
 import { CollapsableSplitButton, CollapsableToolbarButton } from './CollapsableToolbarButton';
 import { FileSource, useScene, useSceneUndoRedoPossible, useSetSource } from './SceneProvider';
-import { StepScreenshotButton } from './StepScreenshotButton';
-import { VideoExportButton } from './export/VideoExportButton';
+import { ScreenshotHotkeyHandler } from './StepScreenshotButton';
 import { ToolbarContext } from './ToolbarContext';
 import { saveFile } from './file';
 import { OpenDialog, SaveAsDialog } from './file/FileDialog';
@@ -81,6 +80,9 @@ export const MainToolbar: React.FC = () => {
 
     return (
         <>
+            {/* Always mounted so ctrl+shift+c works regardless of whether the Share dialog is open. */}
+            <ScreenshotHotkeyHandler />
+
             <DialogOpenContext value={setOpenFileOpen}>
                 <OpenDialog open={openFileOpen} onOpenChange={(ev, data) => setOpenFileOpen(data.open)} />
             </DialogOpenContext>
@@ -113,9 +115,6 @@ export const MainToolbar: React.FC = () => {
                     <ToolbarDivider />
 
                     <ShareDialogButton>Share</ShareDialogButton>
-
-                    <StepScreenshotButton>Screenshot</StepScreenshotButton>
-                    <VideoExportButton>Video</VideoExportButton>
                 </Toolbar>
             </InPortal>
         </>

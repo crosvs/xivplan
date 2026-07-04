@@ -4,7 +4,8 @@ import { CSSProperties, useContext } from 'react';
 import { DarkModeContext } from './ThemeContext';
 import { cssPropertiesToStyleString, themeToCssProperties, themeToCssVars, themeToTokensObject } from './themeUtil';
 
-export const MIN_STAGE_WIDTH = '400px';
+export const MIN_STAGE_WIDTH_PX = 400;
+export const MIN_STAGE_WIDTH = `${MIN_STAGE_WIDTH_PX}px`;
 
 /**
  * Radius of a dot to display when editing an object that is centered on a point.

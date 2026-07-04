@@ -1,5 +1,6 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
+import { useMedia, useWindowSize } from 'react-use';
 import { EditModeProvider } from './EditModeProvider';
 import { RegularHotkeyHandler } from './HotkeyHandler';
 import { MainToolbar } from './MainToolbar';
@@ -7,13 +8,15 @@ import { PanelDragProvider } from './PanelDragProvider';
 import { SceneLoadErrorNotifier } from './SceneLoadErrorNotifier';
 import { useScene } from './SceneProvider';
 import { SelectionProvider } from './SelectionProvider';
-import { StepSelect } from './StepSelect';
+import { CombinedPanel } from './panel/CombinedPanel';
 import { DetailsPanel } from './panel/DetailsPanel';
 import { MainPanel } from './panel/MainPanel';
+import { getPanelStageCount } from './panel/panelStages';
+import { PortraitPanels } from './panel/PortraitPanels';
 import { PlaybackProvider, usePlayback, usePlaybackDispatch } from './playback/PlaybackContext';
 import { PlaybackTimeline } from './playback/PlaybackTimeline';
 import { SceneRenderer } from './render/SceneRenderer';
-import { MIN_STAGE_WIDTH } from './theme';
+import { MIN_STAGE_WIDTH, MIN_STAGE_WIDTH_PX } from './theme';
 import { useIsDirty } from './useIsDirty';
 import { usePreviewMode } from './usePreviewMode';
 import { removeFileExtension } from './util';
@@ -66,8 +69,16 @@ const MainPageContent: React.FC = () => {
     // instead of usePlayback() so the entire page subtree doesn't re-render at 60fps.
     const { setPlaybackTime, togglePlay, isPlayingRef } = usePlaybackDispatch();
     const maxStep = scene.steps.length - 1;
-    const [classicMode, setClassicMode] = useState(false);
     const [previewMode] = usePreviewMode();
+    const isPortrait = useMedia('(orientation: portrait)');
+
+    // Landscape's panel columns auto-size to their own content rather than splitting a directly
+    // measurable "available" share (the canvas's 1fr column absorbs whatever the panels don't
+    // use), so there's no element whose width alone tells us "how much room is there for
+    // panels" the way portrait's shared row does. Approximate it instead: whatever the window
+    // doesn't need for the canvas's own minimum is what's available for panels to grow into.
+    const { width: windowWidth } = useWindowSize();
+    const landscapeStage = getPanelStageCount(windowWidth - MIN_STAGE_WIDTH_PX);
 
     // stepIndexRef captures the step the reducer committed to (e.g. addStep → new step index).
     const stepIndexRef = useRef(stepIndex);
@@ -107,18 +118,24 @@ const MainPageContent: React.FC = () => {
 
             <MainToolbar />
 
-            {!previewMode && <MainPanel />}
+            {!previewMode && !isPortrait && landscapeStage !== 1 && <MainPanel />}
 
             <div className={classes.steps}>
-                {classicMode && <StepSelect />}
-                <PlaybackTimeline classicMode={classicMode} onToggleClassicMode={() => setClassicMode((c) => !c)} />
+                <PlaybackTimeline />
             </div>
 
             <div className={classes.stage}>
                 <SceneRenderer />
             </div>
 
-            {!previewMode && <DetailsPanel />}
+            {!previewMode &&
+                (isPortrait ? (
+                    <PortraitPanels />
+                ) : landscapeStage === 1 ? (
+                    <CombinedPanel />
+                ) : (
+                    <DetailsPanel split={landscapeStage === 3} />
+                ))}
         </>
     );
 };

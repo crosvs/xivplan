@@ -24,7 +24,9 @@ import React, { ReactNode, useState } from 'react';
 import { HtmlPortalNode, InPortal, OutPortal, createHtmlPortalNode } from 'react-reverse-portal';
 import { useAsyncFn } from 'react-use';
 import { CollapsableToolbarButton } from '../CollapsableToolbarButton';
+import { VideoExportTab } from '../export/VideoExportButton';
 import { HotkeyBlockingDialogBody } from '../HotkeyBlockingDialogBody';
+import { ScreenshotTab } from '../StepScreenshotButton';
 import { TabActivity } from '../TabActivity';
 import type { FileSource } from '../SceneProvider';
 import { useScene, useSetSource } from '../SceneProvider';
@@ -45,21 +47,35 @@ export interface ShareDialogButtonProps {
 }
 
 export const ShareDialogButton: React.FC<ShareDialogButtonProps> = ({ children }) => {
+    const [open, setOpen] = useState(false);
+    // Video export has its own in-progress state that must not be silently aborted by
+    // closing the dialog -- mirrors the guard the old standalone VideoExportButton dialog had.
+    const [videoExporting, setVideoExporting] = useState(false);
+
     return (
-        <Dialog>
+        <Dialog
+            open={open}
+            onOpenChange={(_, data) => {
+                if (!videoExporting) setOpen(data.open);
+            }}
+        >
             <DialogTrigger>
                 <CollapsableToolbarButton icon={<ShareRegular />}>{children}</CollapsableToolbarButton>
             </DialogTrigger>
             <DialogSurface>
-                <ShareDialogBody />
+                <ShareDialogBody onVideoExportingChange={setVideoExporting} />
             </DialogSurface>
         </Dialog>
     );
 };
 
-type ShareTab = 'link' | 'nostr';
+type ShareTab = 'link' | 'nostr' | 'screenshot' | 'video';
 
-const ShareDialogBody: React.FC = () => {
+interface ShareDialogBodyProps {
+    onVideoExportingChange: (exporting: boolean) => void;
+}
+
+const ShareDialogBody: React.FC<ShareDialogBodyProps> = ({ onVideoExportingChange }) => {
     const classes = useStyles();
     const { canonicalScene, source } = useScene();
     const isNostr = source?.type === 'nostr';
@@ -78,12 +94,20 @@ const ShareDialogBody: React.FC = () => {
                 >
                     <Tab value="link">Direct Link</Tab>
                     <Tab value="nostr">Nostr Link</Tab>
+                    <Tab value="screenshot">Screenshot</Tab>
+                    <Tab value="video">Video</Tab>
                 </TabList>
                 <TabActivity value="link" activeTab={tab}>
                     <ShareLinkTab scene={canonicalScene} actions={portalNode} />
                 </TabActivity>
                 <TabActivity value="nostr" activeTab={tab}>
                     <NostrTab scene={canonicalScene} source={source} actions={portalNode} />
+                </TabActivity>
+                <TabActivity value="screenshot" activeTab={tab}>
+                    <ScreenshotTab actions={portalNode} />
+                </TabActivity>
+                <TabActivity value="video" activeTab={tab}>
+                    <VideoExportTab actions={portalNode} onExportingChange={onVideoExportingChange} />
                 </TabActivity>
             </DialogContent>
             <DialogActions fluid className={classes.actionsPortal}>

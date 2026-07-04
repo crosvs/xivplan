@@ -1,5 +1,5 @@
 /**
- * VideoExportButton — exports the playback animation as a WebM video.
+ * VideoExportTab — Share dialog tab that exports the playback animation as a WebM video.
  *
  * Rendering: frames are produced off-screen by a hidden ScenePreview driven
  * by StaticPlaybackProvider, one frame per React state tick.
@@ -14,25 +14,22 @@
 
 import {
     Button,
-    Dialog,
     DialogActions,
-    DialogBody,
-    DialogContent,
-    DialogSurface,
-    DialogTitle,
+    DialogTrigger,
     Field,
     Label,
     Portal,
     Select,
     ToggleButton,
     makeStyles,
+    mergeClasses,
     tokens,
 } from '@fluentui/react-components';
-import { AlertFilled, AlertOffRegular, AlertRegular, VideoRegular } from '@fluentui/react-icons';
+import { AlertFilled, AlertOffRegular, AlertRegular } from '@fluentui/react-icons';
 import Konva from 'konva';
-import React, { PropsWithChildren, useContext, useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
+import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
 import { ArrayBufferTarget, Muxer } from 'webm-muxer';
-import { CollapsableToolbarButton } from '../CollapsableToolbarButton';
 import { getCanvasSize } from '../coord';
 import { downloadBlob } from '../file/blob';
 import { ObjectLoadingContext } from '../ObjectLoadingContext';
@@ -287,24 +284,29 @@ const VideoCapture: React.FC<VideoCaptureProps> = ({
     );
 };
 
-// ─── Main button + dialog ─────────────────────────────────────────────────────
+// ─── Main tab ─────────────────────────────────────────────────────────────────
 
-export const VideoExportButton: React.FC<PropsWithChildren> = ({ children }) => {
+export interface VideoExportTabProps {
+    actions: HtmlPortalNode;
+    /** Fires whenever an export starts/stops, so the Share dialog can avoid being
+     * dismissed mid-export (which would silently abort it). */
+    onExportingChange?: (exporting: boolean) => void;
+}
+
+export const VideoExportTab: React.FC<VideoExportTabProps> = ({ actions, onExportingChange }) => {
     const classes = useStyles();
-    const { scene } = useScene();
+    const { scene, source } = useScene();
     const playback = useOptionalPlayback();
 
-    const [open, setOpen] = useState(false);
     const [speed, setSpeed] = useState(DEFAULT_OPTIONS.speed);
     const [pixelRatio, setPixelRatio] = useState(DEFAULT_OPTIONS.pixelRatio);
     const [framerate, setFramerate] = useState(DEFAULT_OPTIONS.framerate);
-    const [exporting, setExporting] = useState(false);
+    const [exporting, setExportingState] = useState(false);
     const [progress, setProgress] = useState(0);
     const [notifyWhenDone, setNotifyWhenDone] = useState(false);
     const cancelRef = useRef(false);
     const exportStartRef = useRef(0);
 
-    const { source } = useScene();
     const disabled = scene.steps.length < 2 || !playback;
     const maxStep = scene.steps.length - 1;
     const totalFrames = disabled ? 0 : totalFrameCount(maxStep, speed, framerate);
@@ -312,6 +314,11 @@ export const VideoExportButton: React.FC<PropsWithChildren> = ({ children }) => 
 
     const supportsNotifications = 'Notification' in window;
     const notificationsBlocked = supportsNotifications && Notification.permission === 'denied';
+
+    const setExporting = (value: boolean) => {
+        setExportingState(value);
+        onExportingChange?.(value);
+    };
 
     const handleNotifyToggle = async () => {
         if (notifyWhenDone) {
@@ -352,7 +359,6 @@ export const VideoExportButton: React.FC<PropsWithChildren> = ({ children }) => 
         downloadBlob(blob, fileName);
         setExporting(false);
         setProgress(0);
-        setOpen(false);
         if (notifyWhenDone && Notification.permission === 'granted') {
             const elapsed = Math.round((Date.now() - exportStartRef.current) / 1000);
             const mins = Math.floor(elapsed / 60);
@@ -370,133 +376,112 @@ export const VideoExportButton: React.FC<PropsWithChildren> = ({ children }) => 
 
     return (
         <>
-            <CollapsableToolbarButton icon={<VideoRegular />} onClick={() => setOpen(true)} disabled={disabled}>
-                {children}
-            </CollapsableToolbarButton>
+            <div className={classes.optionsRow}>
+                <Field label="Speed" className={classes.optionField}>
+                    <Select
+                        value={speed.toString()}
+                        onChange={(_, d) => setSpeed(parseFloat(d.value))}
+                        disabled={exporting}
+                        size="small"
+                    >
+                        {SPEED_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                                {o.label}
+                            </option>
+                        ))}
+                    </Select>
+                </Field>
+                <Field label="Resolution" className={classes.optionField}>
+                    <Select
+                        value={pixelRatio.toString()}
+                        onChange={(_, d) => setPixelRatio(parseFloat(d.value))}
+                        disabled={exporting}
+                        size="small"
+                    >
+                        {RESOLUTION_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                                {o.label}
+                            </option>
+                        ))}
+                    </Select>
+                </Field>
+                <Field label="Framerate" className={classes.optionField}>
+                    <Select
+                        value={framerate.toString()}
+                        onChange={(_, d) => setFramerate(parseInt(d.value))}
+                        disabled={exporting}
+                        size="small"
+                    >
+                        {FRAMERATE_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                                {o.label}
+                            </option>
+                        ))}
+                    </Select>
+                </Field>
+            </div>
 
-            <Dialog
-                open={open}
-                onOpenChange={(_, d) => {
-                    if (!exporting) setOpen(d.open);
-                }}
-            >
-                <DialogSurface>
-                    <DialogBody>
-                        <DialogTitle>Export video</DialogTitle>
-                        <DialogContent className={classes.content}>
-                            <div className={classes.optionsRow}>
-                                <Field label="Speed" className={classes.optionField}>
-                                    <Select
-                                        value={speed.toString()}
-                                        onChange={(_, d) => setSpeed(parseFloat(d.value))}
-                                        disabled={exporting}
-                                        size="small"
-                                    >
-                                        {SPEED_OPTIONS.map((o) => (
-                                            <option key={o.value} value={o.value}>
-                                                {o.label}
-                                            </option>
-                                        ))}
-                                    </Select>
-                                </Field>
-                                <Field label="Resolution" className={classes.optionField}>
-                                    <Select
-                                        value={pixelRatio.toString()}
-                                        onChange={(_, d) => setPixelRatio(parseFloat(d.value))}
-                                        disabled={exporting}
-                                        size="small"
-                                    >
-                                        {RESOLUTION_OPTIONS.map((o) => (
-                                            <option key={o.value} value={o.value}>
-                                                {o.label}
-                                            </option>
-                                        ))}
-                                    </Select>
-                                </Field>
-                                <Field label="Framerate" className={classes.optionField}>
-                                    <Select
-                                        value={framerate.toString()}
-                                        onChange={(_, d) => setFramerate(parseInt(d.value))}
-                                        disabled={exporting}
-                                        size="small"
-                                    >
-                                        {FRAMERATE_OPTIONS.map((o) => (
-                                            <option key={o.value} value={o.value}>
-                                                {o.label}
-                                            </option>
-                                        ))}
-                                    </Select>
-                                </Field>
-                            </div>
+            {!exporting && (
+                <Label className={classes.note}>
+                    {totalFrames} frames · {totalSecs.toFixed(1)}s · {framerate} FPS · WebM (VP9)
+                </Label>
+            )}
 
-                            {!exporting && (
-                                <Label className={classes.note}>
-                                    {totalFrames} frames · {totalSecs.toFixed(1)}s · {framerate} FPS · WebM (VP9)
-                                </Label>
-                            )}
+            {exporting && (
+                <div className={classes.progressSection}>
+                    <div className={classes.progressHeader}>
+                        {progress < 1 ? (
+                            <>
+                                <Label>Rendering…</Label>
+                                <Label className={classes.progressPct}>{Math.round(progress * 100)}%</Label>
+                            </>
+                        ) : (
+                            <Label>Finalizing…</Label>
+                        )}
+                    </div>
+                    <div className={classes.progressBar}>
+                        <div className={classes.progressBarFill} style={{ width: `${progress * 100}%` }} />
+                    </div>
+                </div>
+            )}
 
-                            {exporting && (
-                                <div className={classes.progressSection}>
-                                    <div className={classes.progressHeader}>
-                                        {progress < 1 ? (
-                                            <>
-                                                <Label>Rendering…</Label>
-                                                <Label className={classes.progressPct}>
-                                                    {Math.round(progress * 100)}%
-                                                </Label>
-                                            </>
-                                        ) : (
-                                            <Label>Finalizing…</Label>
-                                        )}
-                                    </div>
-                                    <div className={classes.progressBar}>
-                                        <div
-                                            className={classes.progressBarFill}
-                                            style={{ width: `${progress * 100}%` }}
-                                        />
-                                    </div>
-                                </div>
-                            )}
-                        </DialogContent>
-
-                        <DialogActions className={exporting ? classes.actionsExporting : undefined}>
-                            {exporting ? (
-                                <>
-                                    {supportsNotifications &&
-                                        (notificationsBlocked ? (
-                                            <Button
-                                                appearance="secondary"
-                                                icon={<AlertOffRegular />}
-                                                disabled
-                                                title="Notifications are blocked by your browser"
-                                            />
-                                        ) : (
-                                            <ToggleButton
-                                                appearance="secondary"
-                                                icon={notifyWhenDone ? <AlertFilled /> : <AlertRegular />}
-                                                checked={notifyWhenDone}
-                                                onClick={handleNotifyToggle}
-                                                title={notifyWhenDone ? 'Cancel notification' : 'Notify me when done'}
-                                            />
-                                        ))}
-                                    <Button appearance="secondary" onClick={handleCancel}>
-                                        Cancel
-                                    </Button>
-                                </>
-                            ) : (
-                                <>
-                                    <Button appearance="secondary" onClick={() => setOpen(false)}>
-                                        Close
-                                    </Button>
-                                    <Button appearance="primary" onClick={handleExport} disabled={disabled}>
-                                        Export
-                                    </Button>
-                                </>
-                            )}
-                        </DialogActions>
-                    </DialogBody>
-                </DialogSurface>
-            </Dialog>
+            <InPortal node={actions}>
+                <DialogActions fluid className={mergeClasses(exporting && classes.actionsExporting)}>
+                    {exporting ? (
+                        <>
+                            {supportsNotifications &&
+                                (notificationsBlocked ? (
+                                    <Button
+                                        appearance="secondary"
+                                        icon={<AlertOffRegular />}
+                                        disabled
+                                        title="Notifications are blocked by your browser"
+                                    />
+                                ) : (
+                                    <ToggleButton
+                                        appearance="secondary"
+                                        icon={notifyWhenDone ? <AlertFilled /> : <AlertRegular />}
+                                        checked={notifyWhenDone}
+                                        onClick={handleNotifyToggle}
+                                        title={notifyWhenDone ? 'Cancel notification' : 'Notify me when done'}
+                                    />
+                                ))}
+                            <Button appearance="secondary" onClick={handleCancel}>
+                                Cancel
+                            </Button>
+                        </>
+                    ) : (
+                        <>
+                            <DialogTrigger disableButtonEnhancement>
+                                <Button>Close</Button>
+                            </DialogTrigger>
+                            <Button appearance="primary" onClick={handleExport} disabled={disabled}>
+                                Export
+                            </Button>
+                        </>
+                    )}
+                </DialogActions>
+            </InPortal>
 
             {/* Hidden off-screen capture — mounted only while exporting */}
             {exporting && (
@@ -521,16 +506,11 @@ export const VideoExportButton: React.FC<PropsWithChildren> = ({ children }) => 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-    content: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: tokens.spacingVerticalM,
-        minWidth: '280px',
-    },
     optionsRow: {
         display: 'flex',
         flexDirection: 'row',
         gap: tokens.spacingHorizontalM,
+        marginBottom: tokens.spacingVerticalM,
     },
     optionField: {
         flex: '1 1 0',

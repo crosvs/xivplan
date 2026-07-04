@@ -39,6 +39,11 @@ const useStyles = makeStyles({
         columnGap: GAP,
         minHeight: HEADER_HEIGHT,
         paddingInlineEnd: '30px',
+
+        '@media (orientation: portrait)': {
+            columnGap: tokens.spacingHorizontalS,
+            paddingInlineEnd: tokens.spacingHorizontalS,
+        },
     },
     title: {
         display: 'flex',
@@ -48,6 +53,15 @@ const useStyles = makeStyles({
         gap: GAP,
         width: `calc(${PANEL_WIDTH}px - ${GAP})`,
         textDecoration: 'none',
+
+        // This width exists to align with the left panel below it in the desktop/landscape
+        // layout -- in portrait mode the panels move below the scene instead, so that
+        // alignment doesn't apply, and the fixed width just wastes scarce header space.
+        '@media (orientation: portrait)': {
+            width: 'auto',
+            paddingLeft: tokens.spacingHorizontalS,
+            flexShrink: 0,
+        },
     },
     commandBar: {
         flexGrow: 1,

@@ -10,19 +10,19 @@ import {
     Label,
     Select,
     Slider,
-    ToggleButton,
     Tooltip,
     makeStyles,
     mergeClasses,
     tokens,
     typographyStyles,
 } from '@fluentui/react-components';
-import { ArrowResetRegular, PauseRegular, PlayRegular, TabDesktopMultipleRegular } from '@fluentui/react-icons';
-import React, { memo, useEffect } from 'react';
+import { PauseRegular, PlayRegular } from '@fluentui/react-icons';
+import React, { memo, ReactNode, useEffect, useRef } from 'react';
 import { CrossStepSelection } from '../CrossStepContext';
 import { useScene } from '../SceneProvider';
 import { AddStepButton, RemoveStepButton, ReorderStepsButton } from '../StepSelect';
 import { useCrossStepSelection, useSelection, useSimilarObjects } from '../selection';
+import { useElementSize } from '../useElementSize';
 import { useIsDirty } from '../useIsDirty';
 import { useViewTransform } from '../useViewTransform';
 import { removeFileExtension } from '../util';
@@ -31,18 +31,24 @@ import { usePlayback, usePlaybackDispatch } from './PlaybackContext';
 
 const ZOOM_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].filter((z) => z >= MIN_ZOOM && z <= MAX_ZOOM);
 
-interface PlaybackTimelineProps {
-    classicMode: boolean;
-    onToggleClassicMode: () => void;
-}
-
-export const PlaybackTimeline: React.FC<PlaybackTimelineProps> = ({ classicMode, onToggleClassicMode }) => {
+export const PlaybackTimeline: React.FC = () => {
     const classes = useStyles();
-    const { scene, dispatch, source } = useScene();
+    const { scene, source } = useScene();
     const { state, setPlaybackTime, togglePlay, setSpeed, updateMaxStep } = usePlayback();
     const { isPlaying, playbackTime, speed } = state;
     const [transform, setTransform] = useViewTransform();
     const isDirty = useIsDirty();
+
+    // The label sits between the two button groups when everything fits on one line, but needs
+    // to move to its own full-width row above them when it doesn't -- not just reordering, since
+    // its position in the row structure itself differs between the two layouts. A hidden clone of
+    // the single-row layout (below) measures whether it would actually fit, since that depends on
+    // the (variable-length) plan name and isn't something CSS alone can decide here.
+    const containerRef = useRef<HTMLDivElement>(null);
+    const { width: containerWidth } = useElementSize(containerRef);
+    const measureRef = useRef<HTMLDivElement>(null);
+    const { width: neededWidth } = useElementSize(measureRef);
+    const isStacked = containerWidth > 0 && neededWidth > containerWidth;
 
     const stepCount = scene.steps.length;
     const maxStep = stepCount - 1;
@@ -57,9 +63,13 @@ export const PlaybackTimeline: React.FC<PlaybackTimelineProps> = ({ classicMode,
         setPlaybackTime(data.value);
     };
 
-    const handleReset = () => {
-        setPlaybackTime(0);
-        dispatch({ type: 'setStep', index: 0 });
+    // Pressing Play at (or past) the last step restarts from the beginning instead of
+    // being a no-op -- there's no separate "reset to start" button anymore.
+    const handlePlayClick = () => {
+        if (!isPlaying && currentStepIndex >= maxStep) {
+            setPlaybackTime(0);
+        }
+        togglePlay();
     };
 
     const handleSpeedChange = (_: React.ChangeEvent<HTMLSelectElement>) => {
@@ -86,79 +96,106 @@ export const PlaybackTimeline: React.FC<PlaybackTimelineProps> = ({ classicMode,
         ? `Step ${currentStepIndex + 1} / ${stepCount} - ${planName}${isDirty ? ' ●' : ''}`
         : `Step ${currentStepIndex + 1} / ${stepCount}`;
 
+    const primaryButtons = (
+        <div className={classes.primaryButtons}>
+            <AddStepButton size="small" />
+
+            <Tooltip
+                content={!isPlaying && currentStepIndex >= maxStep ? 'Restart' : isPlaying ? 'Pause' : 'Play'}
+                relationship="label"
+                withArrow
+            >
+                <Button
+                    appearance="subtle"
+                    icon={isPlaying ? <PauseRegular /> : <PlayRegular />}
+                    onClick={handlePlayClick}
+                    size="small"
+                />
+            </Tooltip>
+        </div>
+    );
+
+    const stepLabelEl = (
+        <Tooltip
+            content={planName ? (isDirty ? `${planName} (unsaved changes)` : planName) : stepLabel}
+            relationship="label"
+            withArrow
+        >
+            <Label className={classes.stepLabel}>{stepLabel}</Label>
+        </Tooltip>
+    );
+
+    const speedControlsChildren = (
+        <>
+            <Label className={classes.speedLabel}>Zoom</Label>
+            <Select
+                value={(zoomPercent / 100).toString()}
+                onChange={handleZoomChange}
+                size="small"
+                className={classes.speedSelect}
+            >
+                {!isZoomPreset && <option value={zoomPercent / 100}>{zoomPercent}%</option>}
+                {ZOOM_PRESETS.map((z) => (
+                    <option key={z} value={z}>
+                        {Math.round(z * 100)}%
+                    </option>
+                ))}
+            </Select>
+
+            <Label className={classes.speedLabel}>Speed</Label>
+            <Select value={speed.toString()} onChange={handleSpeedChange} size="small" className={classes.speedSelect}>
+                <option value="0.25">0.25×</option>
+                <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
+                <option value="1">1×</option>
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+            </Select>
+            <ReorderStepsButton />
+            <RemoveStepButton />
+        </>
+    );
+
+    // Plain version for the stacked buttons row, which relies on its own justifyContent to push
+    // this group to the far right -- that row keeps flexWrap as a last-resort safety net, and an
+    // auto margin combined with flexWrap can make a flex container overflow instead of wrapping
+    // cleanly, so marginLeft: auto is only safe to use where wrapping never happens (the inline
+    // row below, which is always nowrap).
+    const speedControls = <div className={classes.speedWrapper}>{speedControlsChildren}</div>;
+
+    // Buttons stay clustered together and leftmost either way; the label sits between the two
+    // button groups when it fits on one line, or moves to its own full-width row above the
+    // buttons when it doesn't (decided by isStacked, computed from the hidden measurement clone
+    // below rather than by CSS, since whether it fits depends on the plan name's length).
+    const inlineRow: ReactNode = (
+        <div className={classes.inlineRow}>
+            {primaryButtons}
+            {stepLabelEl}
+            <div className={mergeClasses(classes.speedWrapper, classes.pushRight)}>{speedControlsChildren}</div>
+        </div>
+    );
+
     return (
         <div className={classes.root}>
-            {/* Controls row */}
-            <div className={classes.controls}>
-                <AddStepButton size="small" />
+            <div ref={containerRef} className={classes.controls}>
+                {isStacked ? (
+                    <>
+                        {stepLabelEl}
+                        <div className={classes.buttonsRow}>
+                            {primaryButtons}
+                            {speedControls}
+                        </div>
+                    </>
+                ) : (
+                    inlineRow
+                )}
+            </div>
 
-                <Tooltip content={isPlaying ? 'Pause' : 'Play'} relationship="label" withArrow>
-                    <Button
-                        appearance="subtle"
-                        icon={isPlaying ? <PauseRegular /> : <PlayRegular />}
-                        onClick={togglePlay}
-                        size="small"
-                    />
-                </Tooltip>
-
-                <Tooltip content="Reset to start" relationship="label" withArrow>
-                    <Button appearance="subtle" icon={<ArrowResetRegular />} onClick={handleReset} size="small" />
-                </Tooltip>
-
-                <Tooltip
-                    content={planName ? (isDirty ? `${planName} (unsaved changes)` : planName) : stepLabel}
-                    relationship="label"
-                    withArrow
-                >
-                    <Label className={classes.stepLabel}>{stepLabel}</Label>
-                </Tooltip>
-
-                <div className={classes.speedWrapper}>
-                    <Label className={classes.speedLabel}>Zoom</Label>
-                    <Select
-                        value={(zoomPercent / 100).toString()}
-                        onChange={handleZoomChange}
-                        size="small"
-                        className={classes.speedSelect}
-                    >
-                        {!isZoomPreset && <option value={zoomPercent / 100}>{zoomPercent}%</option>}
-                        {ZOOM_PRESETS.map((z) => (
-                            <option key={z} value={z}>
-                                {Math.round(z * 100)}%
-                            </option>
-                        ))}
-                    </Select>
-
-                    <Label className={classes.speedLabel}>Speed</Label>
-                    <Select
-                        value={speed.toString()}
-                        onChange={handleSpeedChange}
-                        size="small"
-                        className={classes.speedSelect}
-                    >
-                        <option value="0.25">0.25×</option>
-                        <option value="0.5">0.5×</option>
-                        <option value="0.75">0.75×</option>
-                        <option value="1">1×</option>
-                        <option value="2">2×</option>
-                        <option value="4">4×</option>
-                    </Select>
-                    <Tooltip
-                        content={classicMode ? 'Switch to timeline navigation' : 'Switch to classic tab navigation'}
-                        relationship="label"
-                        withArrow
-                    >
-                        <ToggleButton
-                            appearance="subtle"
-                            icon={<TabDesktopMultipleRegular />}
-                            checked={classicMode}
-                            onClick={onToggleClassicMode}
-                            size="small"
-                        />
-                    </Tooltip>
-                    <ReorderStepsButton />
-                    <RemoveStepButton />
-                </div>
+            {/* Hidden clone of the single-row layout, purely to measure whether it would fit --
+                kept mounted (and re-measured) even while stacked, so we can switch back to the
+                single row once there's room again. */}
+            <div ref={measureRef} className={classes.measure} aria-hidden="true">
+                {inlineRow}
             </div>
 
             {/* Timeline slider */}
@@ -271,6 +308,7 @@ const PlaybackStepMarkers = memo(function PlaybackStepMarkers({
 
 const useStyles = makeStyles({
     root: {
+        position: 'relative',
         display: 'flex',
         flexFlow: 'column',
         width: '100%',
@@ -281,24 +319,81 @@ const useStyles = makeStyles({
         userSelect: 'none',
     },
 
+    // Column layout: either one child (the single inline row) or two (the label's own row, then
+    // the buttons' own row) -- flex column items stretch to fill the full width by default, which
+    // is exactly what both the label and the buttons row need when stacked.
     controls: {
         display: 'flex',
+        flexFlow: 'column',
+        gap: tokens.spacingVerticalXS,
+    },
+
+    inlineRow: {
+        display: 'flex',
         flexFlow: 'row',
-        flexWrap: 'wrap',
+        flexWrap: 'nowrap',
         alignItems: 'center',
         gap: tokens.spacingHorizontalS,
+        minWidth: 0,
+    },
+
+    // Absolutely positioned and hidden so it never affects visible layout or is reachable/
+    // interactive, but still participates in layout enough to report its natural (unwrapped,
+    // unconstrained) width via ResizeObserver -- used to decide whether the real inline row would
+    // actually fit (see isStacked). width: max-content is essential here: a plain `auto` width on
+    // an absolutely positioned element is shrink-to-fit *clamped by the containing block's
+    // available space* per the CSS spec, so once the page got narrow enough, this would silently
+    // report a capped (too-small) width instead of the row's true unwrapped width -- exactly
+    // masking the "should stack now" signal `isStacked` depends on. max-content explicitly sizes
+    // to the content's preferred width regardless of how little space is actually available.
+    measure: {
+        position: 'absolute',
+        visibility: 'hidden',
+        pointerEvents: 'none',
+        top: 0,
+        left: 0,
+        width: 'max-content',
     },
 
     stepLabel: {
         ...typographyStyles.caption1,
         color: tokens.colorNeutralForeground2,
         minWidth: '80px',
+        maxWidth: '100%',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
+
+    // Only ever rendered as a full-width child of `controls` (when stacked), with its own two
+    // groups pushed to opposite ends -- flexWrap here is just a last-resort safety net for
+    // extremely narrow screens where even a full-width row isn't enough for both groups.
+    buttonsRow: {
+        display: 'flex',
+        flexFlow: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: tokens.spacingHorizontalS,
+    },
+
+    primaryButtons: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spacingHorizontalS,
     },
 
     speedWrapper: {
         display: 'flex',
+        flexWrap: 'wrap',
         alignItems: 'center',
         gap: tokens.spacingHorizontalXS,
+    },
+
+    // Pushes this group (and only this group) to the far right, leaving whatever precedes it
+    // clustered together at the start with normal gaps -- used for the inline row, where
+    // justifyContent alone can't express "cluster the first two, push the third" with 3 children.
+    pushRight: {
         marginLeft: 'auto',
     },
 

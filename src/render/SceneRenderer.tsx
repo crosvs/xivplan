@@ -13,6 +13,9 @@ import { EditMode } from '../editMode';
 import { Scene } from '../scene';
 import { selectNewObjects, selectNone, useCrossStepSelection, useSelection } from '../selection';
 import { UndoContext } from '../undo/undoContext';
+import { CONTROL_POINT_NAME } from '../prefabs/ControlPoint';
+import { SELECTABLE_OBJECT_NAME } from '../prefabs/SelectableObject';
+import { TOUCH_MOVE_SLOP } from '../touchTuning';
 import { useEditMode } from '../useEditMode';
 import { useElementSize } from '../useElementSize';
 import { usePanelDrag } from '../usePanelDrag';
@@ -44,6 +47,44 @@ function getTouchMidpoint(touches: TouchList): Vector2d {
     };
 }
 
+/** Walks up from `target` through Konva ancestors (up to but excluding the Stage), returning
+ * true if any node along the way satisfies `predicate`. */
+function hasAncestorMatching(target: Konva.Node, predicate: (node: Konva.Node) => boolean): boolean {
+    let node: Konva.Node | null = target;
+    while (node && !(node instanceof Konva.Stage)) {
+        if (predicate(node)) {
+            return true;
+        }
+        node = node.getParent();
+    }
+    return false;
+}
+
+/** Whether this node or one of its ancestors will claim the gesture as a drag. */
+function isDraggableTarget(target: Konva.Node): boolean {
+    return hasAncestorMatching(target, (node) => node.draggable());
+}
+
+/**
+ * Whether this node or one of its ancestors is a scene object (as opposed to background/arena
+ * decoration, which isn't the literal Stage but should still count as "empty" for tap-to-deselect
+ * purposes -- unlike a mouse click, a touch isn't stopped from reaching the Stage by an object's
+ * own handler, so target identity has to be checked explicitly instead of relying on bubbling.
+ */
+function isSelectableObjectTarget(target: Konva.Node): boolean {
+    return hasAncestorMatching(target, (node) => node.hasName(SELECTABLE_OBJECT_NAME));
+}
+
+/**
+ * Whether this node or one of its ancestors is a control-point handle (arc/star/donut/line
+ * resize/rotate handles etc.) -- these implement their own manual pointer-drag tracking rather
+ * than Konva's declarative `draggable`, so they need their own check to keep a touch on them
+ * from also arming canvas panning.
+ */
+function isControlPointTarget(target: Konva.Node): boolean {
+    return hasAncestorMatching(target, (node) => node.hasName(CONTROL_POINT_NAME));
+}
+
 /** Rescales/repositions the view so the given screen point stays under the cursor/fingers. */
 function zoomAroundPoint(transform: ViewTransform, point: Vector2d, newScale: number): ViewTransform {
     const scale = clamp(newScale, MIN_ZOOM, MAX_ZOOM);
@@ -70,7 +111,11 @@ export const SceneRenderer: React.FC = () => {
 
     // Tracks in-progress single-finger pan / two-finger pinch gestures between touch events.
     const touchPanRef = useRef<Vector2d | null>(null);
-    const touchPinchRef = useRef<{ distance: number } | null>(null);
+    const touchPinchRef = useRef<{ distance: number; midpoint: Vector2d } | null>(null);
+    // Start point of the current single-finger touch gesture, and whether it began on empty
+    // canvas -- used to detect "this was a tap on empty space" at touch-end, independent of
+    // Konva's own click/tap synthesis (which real touch jitter can make unreliable).
+    const touchStartRef = useRef<{ point: Vector2d; onEmpty: boolean } | null>(null);
 
     // The Stage itself always fills the available container (so panels appearing/disappearing,
     // e.g. toggling preview mode, or the window resizing, immediately uses the freed-up space)
@@ -100,22 +145,22 @@ export const SceneRenderer: React.FC = () => {
         });
     }, [containerWidth, containerHeight, arenaSize.width, arenaSize.height, setTransform]);
 
+    // Preview mode preserves whatever was selected when it was turned on, so clicking/tapping
+    // around the canvas while previewing shouldn't change it. Likewise, clicking/tapping on
+    // nothing while selecting a connection target should keep the current selection to better
+    // keep the visuals of which objects are going to get connected.
+    const deselectAll = () => {
+        if (previewMode || editMode === EditMode.SelectConnection) {
+            return;
+        }
+        setSelection(selectNone());
+        setCrossStep(new Map());
+    };
+
     const onClickStage = (e: KonvaEventObject<MouseEvent>) => {
-        // Preview mode preserves whatever was selected when it was turned on, so
-        // clicking around the canvas while previewing shouldn't change it.
-        if (previewMode) {
-            return;
-        }
-        // Clicking on nothing while selecting a connection target should keep the
-        // current selection to better keep the visuals of which objects are going to
-        // get connected.
-        if (editMode === EditMode.SelectConnection) {
-            return;
-        }
         // Clicking on nothing (with no modifier keys held) should cancel all selections.
         if (!e.evt.ctrlKey && !e.evt.shiftKey) {
-            setSelection(selectNone());
-            setCrossStep(new Map());
+            deselectAll();
         }
     };
 
@@ -156,17 +201,26 @@ export const SceneRenderer: React.FC = () => {
     const onTouchStart = (e: KonvaEventObject<TouchEvent>) => {
         const touches = e.evt.touches;
         if (touches.length === 1) {
-            // Only pan for a touch that starts on empty canvas -- one that starts on an
-            // object should still move/drag that object like before.
-            if (e.target !== e.target.getStage()) {
+            // A touch that starts on an object which is actually draggable (only true for
+            // objects already selected -- see DraggableObject), or on a control-point handle
+            // (arc/star/donut/line resize/rotate handles etc., which track their own drag), is
+            // left alone so that gesture can take over. Anything else -- empty canvas, or an
+            // unselected object -- pans instead, so panning is never blocked by objects in the way.
+            if (isDraggableTarget(e.target) || isControlPointTarget(e.target)) {
+                touchPanRef.current = null;
+                touchPinchRef.current = null;
+                touchStartRef.current = null;
                 return;
             }
             touchPinchRef.current = null;
-            touchPanRef.current = { x: touches[0]!.clientX, y: touches[0]!.clientY };
+            const point = { x: touches[0]!.clientX, y: touches[0]!.clientY };
+            touchPanRef.current = point;
+            touchStartRef.current = { point, onEmpty: !isSelectableObjectTarget(e.target) };
         } else if (touches.length === 2) {
             e.evt.preventDefault();
             touchPanRef.current = null;
-            touchPinchRef.current = { distance: getTouchDistance(touches) };
+            touchStartRef.current = null;
+            touchPinchRef.current = { distance: getTouchDistance(touches), midpoint: getTouchMidpoint(touches) };
         }
     };
 
@@ -189,21 +243,43 @@ export const SceneRenderer: React.FC = () => {
             const midpoint = getTouchMidpoint(touches);
             const pointer = { x: midpoint.x - rect.left, y: midpoint.y - rect.top };
             const scaleFactor = distance / touchPinchRef.current.distance;
+            // Two fingers moving together (not just apart/together) translates the view by the
+            // same screen-pixel delta, so a pinch can pan and zoom in the same gesture.
+            const dx = midpoint.x - touchPinchRef.current.midpoint.x;
+            const dy = midpoint.y - touchPinchRef.current.midpoint.y;
 
-            setTransform((t) => zoomAroundPoint(t, pointer, t.scale * scaleFactor));
-            touchPinchRef.current = { distance };
+            setTransform((t) => {
+                const panned = { ...t, x: t.x + dx, y: t.y + dy };
+                return zoomAroundPoint(panned, pointer, t.scale * scaleFactor);
+            });
+            touchPinchRef.current = { distance, midpoint };
         }
     };
 
     const onTouchEnd = (e: KonvaEventObject<TouchEvent>) => {
         const touches = e.evt.touches;
         if (touches.length === 0) {
+            // A tap (minimal movement) that started on empty canvas deselects. Handled
+            // explicitly here, rather than relying solely on Konva's own click/tap synthesis
+            // for the Stage, since real touch jitter can make that unreliable.
+            const start = touchStartRef.current;
+            const last = touchPanRef.current;
+            if (
+                start?.onEmpty &&
+                last &&
+                Math.hypot(last.x - start.point.x, last.y - start.point.y) < TOUCH_MOVE_SLOP
+            ) {
+                deselectAll();
+            }
             touchPanRef.current = null;
             touchPinchRef.current = null;
+            touchStartRef.current = null;
         } else if (touches.length === 1) {
             // Transitioning from a pinch down to one finger -- resume as a pan.
             touchPinchRef.current = null;
-            touchPanRef.current = { x: touches[0]!.clientX, y: touches[0]!.clientY };
+            const point = { x: touches[0]!.clientX, y: touches[0]!.clientY };
+            touchPanRef.current = point;
+            touchStartRef.current = { point, onEmpty: false };
         }
     };
 

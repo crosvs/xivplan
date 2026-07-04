@@ -19,6 +19,7 @@ import {
 } from '../selection';
 import { SceneSelection } from '../SelectionContext';
 import { useEditMode } from '../useEditMode';
+import { usePointerType } from '../usePointerType';
 import { usePreviewMode } from '../usePreviewMode';
 import { vecSub } from '../vector';
 import { SelectableObject } from './SelectableObject';
@@ -37,13 +38,20 @@ export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, childr
     const [dragSelection, setDragSelection] = useDragSelection();
     const { selection: crossStepSelection } = useCrossStepSelection();
     const center = getCanvasCoord(scene, object);
+    const isTouch = usePointerType() === 'touch';
 
     // Position of the dragged object at the start of the current drag, used to
     // compute the total start-to-end translation once the drag finishes so it
     // can be applied to the selected objects on other (non-visible) pages.
     const dragStartPos = useRef<Position | null>(null);
 
-    const isDraggable = !object.pinned && !previewMode && editMode === EditMode.Normal;
+    // On touch, a one-finger drag over an object should pan the canvas unless that object is
+    // already selected -- otherwise every attempt to pan across an object hijacks the gesture
+    // into moving it instead (see SceneRenderer's touch handlers, which only cede a gesture to
+    // Konva's own drag when the target is actually draggable). Mouse is unaffected: a plain
+    // left-click-drag on an unselected object still selects and moves it in one motion.
+    const isDraggable =
+        !object.pinned && !previewMode && editMode === EditMode.Normal && (!isTouch || selection.has(object.id));
 
     const handleDragStart = (e: KonvaEventObject<DragEvent>) => {
         let newSelection: SceneSelection;

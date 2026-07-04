@@ -2,10 +2,12 @@ import Konva from 'konva';
 import { Box } from 'konva/lib/shapes/Transformer';
 import React, { RefObject, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { Transformer } from 'react-konva';
+import { applyCrossStepChange } from '../crossStepChange';
 import { useScene } from '../SceneProvider';
+import { useCrossStepSelection } from '../selection';
 import { getBaseFacingRotation } from '../coord';
 import { ControlsPortal } from '../render/Portals';
-import { ResizeableObject, SceneObject, UnknownObject } from '../scene';
+import { isResizable, ResizeableObject, SceneObject, UnknownObject } from '../scene';
 import { clamp, clampRotation } from '../util';
 import { useShowResizer } from './highlight';
 
@@ -36,7 +38,8 @@ export const Resizer: React.FC<ResizerProps> = ({
     transformerProps,
     children,
 }) => {
-    const { dispatch, scene } = useScene();
+    const { dispatch, scene, stepIndex } = useScene();
+    const { selection: crossStepSelection } = useCrossStepSelection();
     const showResizer = useShowResizer(object);
     const trRef = useRef<Konva.Transformer>(null);
 
@@ -76,7 +79,38 @@ export const Resizer: React.FC<ResizerProps> = ({
         node.clearCache();
 
         dispatch({ type: 'update', value: { ...object, ...newProps } as SceneObject });
-    }, [dispatch, minHeightRequired, minWidthRequired, nodeRef, object, scene]);
+
+        // Propagate the same position/size/rotation delta to matching objects selected via
+        // "select similar objects" on other pages, mirroring DraggableObject's cross-step drag.
+        const dx = newProps.x - object.x;
+        const dy = newProps.y - object.y;
+        const dWidth = newProps.width - object.width;
+        const dHeight = newProps.height - object.height;
+        const dRotation = newProps.rotation - object.rotation;
+
+        if (dx !== 0 || dy !== 0 || dWidth !== 0 || dHeight !== 0 || dRotation !== 0) {
+            applyCrossStepChange(
+                scene,
+                stepIndex,
+                crossStepSelection,
+                object.id,
+                (other) => {
+                    if (!isResizable(other)) {
+                        return other;
+                    }
+                    return {
+                        ...other,
+                        x: other.x + dx,
+                        y: other.y + dy,
+                        width: Math.max(minWidthRequired, other.width + dWidth),
+                        height: Math.max(minHeightRequired, other.height + dHeight),
+                        rotation: clampRotation(other.rotation + dRotation),
+                    };
+                },
+                dispatch,
+            );
+        }
+    }, [dispatch, minHeightRequired, minWidthRequired, nodeRef, object, scene, stepIndex, crossStepSelection]);
 
     const boundBoxFunc = useCallback(
         (oldBox: Box, newBox: Box) => {

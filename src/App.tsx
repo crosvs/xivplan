@@ -35,16 +35,20 @@ const useStyles = makeStyles({
                 "left-panel content right-panel"
             `,
 
-        // In portrait orientation, panels no longer frame the scene left/right -- they
-        // move below it, stacked side by side across the lower half of the screen.
+        // In portrait orientation, panels no longer frame the scene left/right -- they move
+        // below it. At phone widths, splitting that row into two independent panels (like
+        // landscape's left/right) leaves neither with enough room -- both the Arena/Objects/
+        // Icons/Draw panel and the Properties/Scene panel need roughly 2/3 of the screen to lay
+        // out comfortably -- so portrait instead uses one single panel spanning the full width,
+        // with all tabs merged together (see CombinedPanel).
         '@media (orientation: portrait)': {
-            gridTemplateColumns: '1fr 1fr',
+            gridTemplateColumns: '1fr',
             gridTemplateRows: `min-content min-content 1fr 1fr`,
             gridTemplateAreas: `
-                    "header      header"
-                    "steps       steps"
-                    "content     content"
-                    "left-panel  right-panel"
+                    "header"
+                    "steps"
+                    "content"
+                    "panel"
                 `,
         },
 
@@ -52,6 +56,12 @@ const useStyles = makeStyles({
     },
     // Applied in preview mode, on top of `root`, to collapse the editor panel columns/rows
     // so the steps/content area fills the full width regardless of orientation.
+    //
+    // Needs its own portrait override rather than relying on the unconditional rule above to
+    // beat `root`'s portrait rule: Griffel files media-query rules into a later CSS bucket than
+    // unconditional ones, so `root`'s `@media (orientation: portrait)` grid would otherwise always
+    // win over this class's plain (non-portrait-scoped) rule, regardless of mergeClasses order --
+    // leaving the panels' now-empty grid row still reserved and the canvas short by half.
     rootPreviewMode: {
         gridTemplateColumns: '1fr',
         gridTemplateRows: `min-content min-content 1fr`,
@@ -60,6 +70,16 @@ const useStyles = makeStyles({
                 "steps"
                 "content"
             `,
+
+        '@media (orientation: portrait)': {
+            gridTemplateColumns: '1fr',
+            gridTemplateRows: `min-content min-content 1fr`,
+            gridTemplateAreas: `
+                    "header"
+                    "steps"
+                    "content"
+                `,
+        },
     },
     header: {
         gridArea: 'header',

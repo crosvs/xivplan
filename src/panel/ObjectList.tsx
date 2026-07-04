@@ -216,13 +216,13 @@ const useStyles = makeStyles({
         transitionDuration: tokens.durationFaster,
         transitionTimingFunction: tokens.curveEasyEase,
 
-        backgroundColor: tokens.colorNeutralBackground3,
+        backgroundColor: tokens.colorNeutralBackground2,
 
         ':hover': {
-            backgroundColor: tokens.colorNeutralBackground3Hover,
+            backgroundColor: tokens.colorNeutralBackground2Hover,
         },
         ':hover:active': {
-            backgroundColor: tokens.colorNeutralBackground3Pressed,
+            backgroundColor: tokens.colorNeutralBackground2Pressed,
         },
     },
 

@@ -1,11 +1,20 @@
 import React, { useState } from 'react';
 import { Circle, Line } from 'react-konva';
+import { applyCrossStepChange } from '../crossStepChange';
 import { useScene } from '../SceneProvider';
 import { getAbsoluteRotation, getBaseFacingRotation, getPointerAngle, snapAngle } from '../coord';
 import { getResizeCursor } from '../cursor';
 import { ActivePortal } from '../render/Portals';
-import { InnerRadiusObject, RadiusObject, Scene, SceneObject, UnknownObject, isRotateable } from '../scene';
-import { useIsDragging } from '../selection';
+import {
+    InnerRadiusObject,
+    RadiusObject,
+    Scene,
+    SceneObject,
+    UnknownObject,
+    isRadiusObject,
+    isRotateable,
+} from '../scene';
+import { useCrossStepSelection, useIsDragging } from '../selection';
 import { CENTER_DOT_RADIUS } from '../theme';
 import { clampRotation, mod360 } from '../util';
 import { distance } from '../vector';
@@ -49,7 +58,8 @@ export const RadiusObjectContainer: React.FC<RadiusObjectContainerProps> = ({
     allowRotate,
     allowInnerRadius,
 }) => {
-    const { dispatch, scene } = useScene();
+    const { dispatch, scene, stepIndex } = useScene();
+    const { selection: crossStepSelection } = useCrossStepSelection();
     const showResizer = useShowResizer(object);
     const [isResizing, setResizing] = useState(false);
     const isDragging = useIsDragging(object);
@@ -73,6 +83,35 @@ export const RadiusObjectContainer: React.FC<RadiusObjectContainerProps> = ({
 
         dispatch({ type: 'update', value: { ...object, ...update } as SceneObject });
         onTransformEnd?.(state);
+
+        // Propagate the same radius/rotation/inner-radius delta to matching objects selected via
+        // "select similar objects" on other pages, mirroring DraggableObject's cross-step drag.
+        const dRadius = state.radius - object.radius;
+        const dRotation = isRotateable(object) ? state.rotation - object.rotation : 0;
+        const dInnerRadius = isInnerRadiusObject(object) ? state.innerRadius - object.innerRadius : 0;
+
+        if (dRadius !== 0 || dRotation !== 0 || dInnerRadius !== 0) {
+            applyCrossStepChange(
+                scene,
+                stepIndex,
+                crossStepSelection,
+                object.id,
+                (other) => {
+                    if (!isRadiusObject(other)) {
+                        return other;
+                    }
+                    const next = { ...other, radius: Math.max(MIN_RADIUS, other.radius + dRadius) };
+                    if (isRotateable(next) && dRotation !== 0) {
+                        next.rotation = clampRotation(next.rotation + dRotation);
+                    }
+                    if (isInnerRadiusObject(next) && dInnerRadius !== 0) {
+                        next.innerRadius = Math.max(MIN_RADIUS, next.innerRadius + dInnerRadius);
+                    }
+                    return next;
+                },
+                dispatch,
+            );
+        }
     };
 
     return (
