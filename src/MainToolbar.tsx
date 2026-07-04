@@ -24,6 +24,7 @@ import {
 import React, { ReactElement, useContext, useRef, useState } from 'react';
 import { InPortal } from 'react-reverse-portal';
 import { CollapsableSplitButton, CollapsableToolbarButton } from './CollapsableToolbarButton';
+import { useHeaderCollapseState } from './headerStages';
 import { FileSource, useScene, useSceneUndoRedoPossible, useSetSource } from './SceneProvider';
 import { ScreenshotHotkeyHandler } from './StepScreenshotButton';
 import { ToolbarContext } from './ToolbarContext';
@@ -58,6 +59,7 @@ export const MainToolbar: React.FC = () => {
     const [openFileOpen, setOpenFileOpen] = useState(false);
     const cancelConnectionSelection = useCancelConnectionSelection();
     const [previewMode, setPreviewMode] = usePreviewMode();
+    const { collapseA, collapseB, collapseC, collapseD } = useHeaderCollapseState();
 
     const undo = () => {
         cancelConnectionSelection();
@@ -92,6 +94,7 @@ export const MainToolbar: React.FC = () => {
                     <CollapsableToolbarButton
                         icon={previewMode ? <DocumentEditRegular /> : <EyeRegular />}
                         onClick={() => setPreviewMode((p) => !p)}
+                        collapsed={collapseA}
                     >
                         {previewMode ? 'Editor' : 'Preview'}
                     </CollapsableToolbarButton>
@@ -99,22 +102,36 @@ export const MainToolbar: React.FC = () => {
                     <ToolbarDivider />
 
                     {/* <CollapsableToolbarButton icon={<NewRegular />}>New</CollapsableToolbarButton> */}
-                    <CollapsableToolbarButton icon={<OpenRegular />} onClick={() => setOpenFileOpen(true)}>
+                    <CollapsableToolbarButton
+                        icon={<OpenRegular />}
+                        onClick={() => setOpenFileOpen(true)}
+                        collapsed={collapseB}
+                    >
                         Open
                     </CollapsableToolbarButton>
 
-                    <SaveButton />
+                    <SaveButton collapsed={collapseB} />
 
-                    <CollapsableToolbarButton icon={<ArrowUndoRegular />} onClick={undo} disabled={!undoPossible}>
+                    <CollapsableToolbarButton
+                        icon={<ArrowUndoRegular />}
+                        onClick={undo}
+                        disabled={!undoPossible}
+                        collapsed={collapseC}
+                    >
                         Undo
                     </CollapsableToolbarButton>
-                    <CollapsableToolbarButton icon={<ArrowRedoRegular />} onClick={redo} disabled={!redoPossible}>
+                    <CollapsableToolbarButton
+                        icon={<ArrowRedoRegular />}
+                        onClick={redo}
+                        disabled={!redoPossible}
+                        collapsed={collapseC}
+                    >
                         Redo
                     </CollapsableToolbarButton>
 
                     <ToolbarDivider />
 
-                    <ShareDialogButton>Share</ShareDialogButton>
+                    <ShareDialogButton collapsed={collapseD}>Share</ShareDialogButton>
                 </Toolbar>
             </InPortal>
         </>
@@ -153,7 +170,11 @@ function getSaveButtonState(
     return { type: 'save', text: 'Save', icon: <SaveRegular />, disabled: !isDirty };
 }
 
-const SaveButton: React.FC = () => {
+interface SaveButtonProps {
+    collapsed?: boolean;
+}
+
+const SaveButton: React.FC<SaveButtonProps> = ({ collapsed }) => {
     const classes = useStyles();
     const isDirty = useIsDirty();
     const setSavedState = useSetSavedState();
@@ -246,6 +267,7 @@ const SaveButton: React.FC = () => {
                             }}
                             icon={isSaving ? <Spinner size="tiny" /> : icon}
                             appearance="subtle"
+                            collapsed={collapsed}
                         >
                             {isSaving ? 'Publishing…' : text}
                         </CollapsableSplitButton>

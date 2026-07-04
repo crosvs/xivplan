@@ -44,9 +44,11 @@ import { DownloadButton } from './DownloadButton';
 
 export interface ShareDialogButtonProps {
     children?: ReactNode | undefined;
+    /** See CollapsableToolbarButtonProps.collapsed. */
+    collapsed?: boolean;
 }
 
-export const ShareDialogButton: React.FC<ShareDialogButtonProps> = ({ children }) => {
+export const ShareDialogButton: React.FC<ShareDialogButtonProps> = ({ children, collapsed }) => {
     const [open, setOpen] = useState(false);
     // Video export has its own in-progress state that must not be silently aborted by
     // closing the dialog -- mirrors the guard the old standalone VideoExportButton dialog had.
@@ -60,7 +62,9 @@ export const ShareDialogButton: React.FC<ShareDialogButtonProps> = ({ children }
             }}
         >
             <DialogTrigger>
-                <CollapsableToolbarButton icon={<ShareRegular />}>{children}</CollapsableToolbarButton>
+                <CollapsableToolbarButton icon={<ShareRegular />} collapsed={collapsed}>
+                    {children}
+                </CollapsableToolbarButton>
             </DialogTrigger>
             <DialogSurface>
                 <ShareDialogBody onVideoExportingChange={setVideoExporting} />

@@ -5,7 +5,7 @@ import { EditMode } from '../editMode';
 import { useEditMode } from '../useEditMode';
 import { ArenaPanel } from './ArenaPanel';
 import { DrawPanel } from './DrawPanel';
-import { PANEL_PADDING, PANEL_WIDTH } from './PanelStyles';
+import { COMBINED_PANEL_WIDTH, PANEL_PADDING } from './PanelStyles';
 import { PrefabsPanel } from './PrefabsPanel';
 import { PropertiesPanel } from './PropertiesPanel';
 import { SceneObjectsPanel } from './SceneObjectsPanel';
@@ -44,16 +44,19 @@ export const CombinedPanel: React.FC<CombinedPanelProps> = ({ fill }) => {
     return (
         <div className={mergeClasses(classes.wrapper, fill && classes.fill)}>
             <TabList size="small" selectedValue={tab} onTabSelect={(ev, data) => handleTabChanged(data.value as Tabs)}>
-                <Tab value="arena">Arena</Tab>
                 <Tab value="objects">Objects</Tab>
-                <Tab value="status">Icons</Tab>
-                <Tab value="draw">Draw</Tab>
                 <Tab value="properties">Properties</Tab>
                 <Tab value="scene">Scene</Tab>
+                <Tab value="status">Icons</Tab>
+                <Tab value="draw">Draw</Tab>
+                <Tab value="arena">Arena</Tab>
             </TabList>
             <div className={classes.container}>
-                <TabActivity value="arena" activeTab={tab}>
-                    <ArenaPanel />
+                <TabActivity value="properties" activeTab={tab}>
+                    <PropertiesPanel />
+                </TabActivity>
+                <TabActivity value="scene" activeTab={tab}>
+                    <SceneObjectsPanel />
                 </TabActivity>
                 <TabActivity value="objects" activeTab={tab}>
                     <PrefabsPanel />
@@ -64,11 +67,8 @@ export const CombinedPanel: React.FC<CombinedPanelProps> = ({ fill }) => {
                 <TabActivity value="draw" activeTab={tab}>
                     <DrawPanel />
                 </TabActivity>
-                <TabActivity value="properties" activeTab={tab}>
-                    <PropertiesPanel />
-                </TabActivity>
-                <TabActivity value="scene" activeTab={tab}>
-                    <SceneObjectsPanel />
+                <TabActivity value="arena" activeTab={tab}>
+                    <ArenaPanel />
                 </TabActivity>
             </div>
         </div>
@@ -76,11 +76,12 @@ export const CombinedPanel: React.FC<CombinedPanelProps> = ({ fill }) => {
 };
 
 const useStyles = makeStyles({
-    // Default (landscape Stage 1): a direct grid child at its own natural width, same as
-    // MainPanel/DetailsPanel's own default styling.
+    // Default (landscape Stage 1): a direct grid child, wide enough for all 6 merged tab labels
+    // (see COMBINED_PANEL_WIDTH) -- unlike MainPanel/DetailsPanel's own default width, which only
+    // ever needs to fit one group's worth of tabs.
     wrapper: {
         gridArea: 'right-panel',
-        width: `${PANEL_WIDTH}px`,
+        width: `${COMBINED_PANEL_WIDTH}px`,
         userSelect: 'none',
         backgroundColor: tokens.colorNeutralBackground2,
         overflow: 'hidden',

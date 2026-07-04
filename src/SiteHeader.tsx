@@ -20,9 +20,9 @@ import {
 } from '@fluentui/react-icons';
 import React, { HTMLAttributes, useContext, useState } from 'react';
 import { OutPortal } from 'react-reverse-portal';
-import { useMedia } from 'react-use';
 import { AboutDialog } from './AboutDialog';
 import { ExternalLink } from './ExternalLink';
+import { useHeaderCollapseState } from './headerStages';
 import { HelpContext } from './HelpContext';
 import { PANEL_WIDTH } from './panel/PanelStyles';
 import { DarkModeContext } from './ThemeContext';
@@ -87,9 +87,10 @@ export const SiteHeader: React.FC<HTMLAttributes<HTMLElement>> = ({ className, .
     const [, setHelpOpen] = useContext(HelpContext);
     const [darkMode, setDarkMode] = useContext(DarkModeContext);
     const [aboutOpen, setAboutOpen] = useState(false);
-    // Same breakpoint used for the portrait panel layout -- collapse these into a menu
-    // wherever screen space is tight enough that the layout itself goes portrait/mobile.
-    const isCompact = useMedia('(orientation: portrait)');
+    // Reactive to actual available width (see headerStages.ts) rather than tied to portrait
+    // orientation -- a narrow *landscape* window needs this collapsed too, and a wide portrait
+    // window (e.g. a resized desktop browser) doesn't need it collapsed at all.
+    const { collapseE } = useHeaderCollapseState();
 
     return (
         <header className={mergeClasses(classes.root, className)} {...props}>
@@ -102,7 +103,7 @@ export const SiteHeader: React.FC<HTMLAttributes<HTMLElement>> = ({ className, .
                 <OutPortal node={toolbarNode} />
             </div>
 
-            {isCompact ? (
+            {collapseE ? (
                 <Menu>
                     <MenuTrigger disableButtonEnhancement>
                         <Button
