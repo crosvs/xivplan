@@ -25,6 +25,7 @@ import {
     Tether,
     Ticks,
 } from './scene';
+import { PreviewModeContext } from './PreviewModeContext';
 import { createUndoContext } from './undo/undoContext';
 import { StateActionBase, UndoRedoAction } from './undo/undoReducer';
 import { useSetSavedState } from './useIsDirty';
@@ -282,11 +283,15 @@ export function useLoadScene(): (scene: Scene, source?: FileSource) => void {
     const { dispatch } = useScene();
     const setSavedState = useSetSavedState();
     const [, setSource] = useContext(SourceContext);
+    const [, setPreviewMode] = useContext(PreviewModeContext);
 
     return (scene: Scene, source?: FileSource) => {
         dispatch({ type: 'reset', state: { scene, currentStep: 0 } });
         setSavedState(scene);
         setSource(source);
+        // A manually-initiated load is a deliberate editing action, unlike loading a
+        // shared plan from a URL -- so exit preview mode if it was previously active.
+        setPreviewMode(false);
     };
 }
 

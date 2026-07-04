@@ -1,26 +1,19 @@
 import {
+    Button,
+    DialogActions,
+    DialogTrigger,
+    Field,
+    Select,
     makeStyles,
-    Menu,
-    MenuButtonProps,
-    MenuCheckedValueChangeData,
-    MenuCheckedValueChangeEvent,
-    MenuGroup,
-    MenuGroupHeader,
-    MenuItemRadio,
-    MenuList,
-    MenuPopover,
-    MenuTrigger,
     Portal,
-    SplitButtonProps,
     Toast,
     ToastTitle,
     useToastController,
 } from '@fluentui/react-components';
-import { ScreenshotRegular } from '@fluentui/react-icons';
 import Konva from 'konva';
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
 import { useLocalStorage, useTimeoutFn } from 'react-use';
-import { CollapsableSplitButton } from './CollapsableToolbarButton';
 import { getCanvasSize } from './coord';
 import { MessageToast } from './MessageToast';
 import { ObjectLoadingContext } from './ObjectLoadingContext';
@@ -33,24 +26,18 @@ import { useHotkeys } from './useHotkeys';
 
 const SCREENSHOT_TIMEOUT = 1000;
 
-export type StepScreenshotButtonProps = SplitButtonProps;
-
-export const StepScreenshotButton: React.FC<StepScreenshotButtonProps> = (props) => {
+/**
+ * Shared screenshot-capture state, used both by the always-available ctrl+shift+c
+ * hotkey and by the Share dialog's Screenshot tab. Each caller gets its own
+ * independent instance -- harmless since only one can ever be actively capturing
+ * at a time in practice.
+ */
+function useScreenshotCapture() {
     const classes = useStyles();
     const [scale, setScale] = useLocalStorage('screenshotPixelRatio', 1);
     const [takingScreenshot, setTakingScreenshot] = useState(false);
     const { dispatchToast } = useToastController();
     const cancelConnectionSelection = useCancelConnectionSelection();
-
-    const checkedValues: Record<string, string[]> = {
-        scale: [scale?.toString() ?? '1'],
-    };
-
-    const handleCheckedValueChanged = (e: MenuCheckedValueChangeEvent, data: MenuCheckedValueChangeData) => {
-        if (data.name === 'scale') {
-            setScale(parseInt(data.checkedItems?.[0] ?? '1'));
-        }
-    };
 
     const handleScreenshotDone = (error?: unknown) => {
         setTakingScreenshot(false);
@@ -80,59 +67,65 @@ export const StepScreenshotButton: React.FC<StepScreenshotButtonProps> = (props)
         startTimeout();
     };
 
+    const portal = takingScreenshot ? (
+        <Portal mountNode={{ className: classes.screenshot }}>
+            <ObjectLoadingProvider>
+                <ScreenshotComponent scale={scale} onScreenshotDone={handleScreenshotDone} />
+            </ObjectLoadingProvider>
+        </Portal>
+    ) : null;
+
+    return { scale, setScale, takingScreenshot, startScreenshot, portal };
+}
+
+/** Keeps the ctrl+shift+c screenshot shortcut working regardless of whether the Share dialog is open. */
+export const ScreenshotHotkeyHandler: React.FC = () => {
+    const { startScreenshot, portal } = useScreenshotCapture();
+
     useHotkeys(
         'ctrl+shift+c',
         { category: '7.Steps', help: 'Screenshot current step' },
         (ev) => {
-            cancelConnectionSelection();
-            setTakingScreenshot(true);
+            startScreenshot();
             ev.preventDefault();
         },
-        [setTakingScreenshot],
+        [startScreenshot],
     );
+
+    return portal;
+};
+
+export interface ScreenshotTabProps {
+    actions: HtmlPortalNode;
+}
+
+/** Screenshot tab content for the Share dialog. */
+export const ScreenshotTab: React.FC<ScreenshotTabProps> = ({ actions }) => {
+    const { scale, setScale, takingScreenshot, startScreenshot, portal } = useScreenshotCapture();
 
     return (
         <>
-            <Menu
-                positioning="below-end"
-                checkedValues={checkedValues}
-                onCheckedValueChange={handleCheckedValueChanged}
-            >
-                <MenuTrigger disableButtonEnhancement>
-                    {(triggerProps: MenuButtonProps) => (
-                        <CollapsableSplitButton
-                            {...props}
-                            menuButton={triggerProps}
-                            primaryActionButton={{ onClick: startScreenshot, disabled: takingScreenshot }}
-                            icon={<ScreenshotRegular />}
-                            appearance="subtle"
-                        />
-                    )}
-                </MenuTrigger>
-                <MenuPopover>
-                    <MenuList>
-                        <MenuGroup>
-                            <MenuGroupHeader>Screenshot scale</MenuGroupHeader>
-                            <MenuItemRadio name="scale" value="1">
-                                1X
-                            </MenuItemRadio>
-                            <MenuItemRadio name="scale" value="2">
-                                2X
-                            </MenuItemRadio>
-                            <MenuItemRadio name="scale" value="4">
-                                4X
-                            </MenuItemRadio>
-                        </MenuGroup>
-                    </MenuList>
-                </MenuPopover>
-            </Menu>
-            {takingScreenshot && (
-                <Portal mountNode={{ className: classes.screenshot }}>
-                    <ObjectLoadingProvider>
-                        <ScreenshotComponent scale={scale} onScreenshotDone={handleScreenshotDone} />
-                    </ObjectLoadingProvider>
-                </Portal>
-            )}
+            <Field label="Scale">
+                <Select value={scale?.toString() ?? '1'} onChange={(_, d) => setScale(parseInt(d.value))} size="small">
+                    <option value="1">1×</option>
+                    <option value="2">2×</option>
+                    <option value="4">4×</option>
+                </Select>
+            </Field>
+            <p>Copies an image of the current step to your clipboard.</p>
+
+            <InPortal node={actions}>
+                <DialogActions fluid>
+                    <Button appearance="primary" onClick={startScreenshot} disabled={takingScreenshot}>
+                        {takingScreenshot ? 'Copying…' : 'Take screenshot'}
+                    </Button>
+                    <DialogTrigger disableButtonEnhancement>
+                        <Button>Close</Button>
+                    </DialogTrigger>
+                </DialogActions>
+            </InPortal>
+
+            {portal}
         </>
     );
 };

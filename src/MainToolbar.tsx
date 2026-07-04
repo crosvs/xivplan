@@ -15,6 +15,8 @@ import {
     ArrowRedoRegular,
     ArrowUndoRegular,
     CloudArrowUpRegular,
+    DocumentEditRegular,
+    EyeRegular,
     OpenRegular,
     SaveEditRegular,
     SaveRegular,
@@ -22,9 +24,9 @@ import {
 import React, { ReactElement, useContext, useRef, useState } from 'react';
 import { InPortal } from 'react-reverse-portal';
 import { CollapsableSplitButton, CollapsableToolbarButton } from './CollapsableToolbarButton';
+import { useHeaderCollapseState } from './headerStages';
 import { FileSource, useScene, useSceneUndoRedoPossible, useSetSource } from './SceneProvider';
-import { StepScreenshotButton } from './StepScreenshotButton';
-import { VideoExportButton } from './export/VideoExportButton';
+import { ScreenshotHotkeyHandler } from './StepScreenshotButton';
 import { ToolbarContext } from './ToolbarContext';
 import { saveFile } from './file';
 import { OpenDialog, SaveAsDialog } from './file/FileDialog';
@@ -36,11 +38,16 @@ import { DialogOpenContext } from './useCloseDialog';
 import { useCancelConnectionSelection } from './useEditMode';
 import { useHotkeys } from './useHotkeys';
 import { useIsDirty, useSetSavedState } from './useIsDirty';
+import { usePreviewMode } from './usePreviewMode';
 
 const useStyles = makeStyles({
     toolbar: {
         paddingLeft: 0,
         paddingRight: 0,
+    },
+    noWrapButton: {
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
     },
 });
 
@@ -51,6 +58,8 @@ export const MainToolbar: React.FC = () => {
     const [undoPossible, redoPossible] = useSceneUndoRedoPossible();
     const [openFileOpen, setOpenFileOpen] = useState(false);
     const cancelConnectionSelection = useCancelConnectionSelection();
+    const [previewMode, setPreviewMode] = usePreviewMode();
+    const { collapseA, collapseB, collapseC, collapseD } = useHeaderCollapseState();
 
     const undo = () => {
         cancelConnectionSelection();
@@ -73,32 +82,56 @@ export const MainToolbar: React.FC = () => {
 
     return (
         <>
+            {/* Always mounted so ctrl+shift+c works regardless of whether the Share dialog is open. */}
+            <ScreenshotHotkeyHandler />
+
             <DialogOpenContext value={setOpenFileOpen}>
                 <OpenDialog open={openFileOpen} onOpenChange={(ev, data) => setOpenFileOpen(data.open)} />
             </DialogOpenContext>
 
             <InPortal node={toolbarNode}>
                 <Toolbar className={classes.toolbar}>
+                    <CollapsableToolbarButton
+                        icon={previewMode ? <DocumentEditRegular /> : <EyeRegular />}
+                        onClick={() => setPreviewMode((p) => !p)}
+                        collapsed={collapseA}
+                    >
+                        {previewMode ? 'Editor' : 'Preview'}
+                    </CollapsableToolbarButton>
+
+                    <ToolbarDivider />
+
                     {/* <CollapsableToolbarButton icon={<NewRegular />}>New</CollapsableToolbarButton> */}
-                    <CollapsableToolbarButton icon={<OpenRegular />} onClick={() => setOpenFileOpen(true)}>
+                    <CollapsableToolbarButton
+                        icon={<OpenRegular />}
+                        onClick={() => setOpenFileOpen(true)}
+                        collapsed={collapseB}
+                    >
                         Open
                     </CollapsableToolbarButton>
 
-                    <SaveButton />
+                    <SaveButton collapsed={collapseB} />
 
-                    <CollapsableToolbarButton icon={<ArrowUndoRegular />} onClick={undo} disabled={!undoPossible}>
+                    <CollapsableToolbarButton
+                        icon={<ArrowUndoRegular />}
+                        onClick={undo}
+                        disabled={!undoPossible}
+                        collapsed={collapseC}
+                    >
                         Undo
                     </CollapsableToolbarButton>
-                    <CollapsableToolbarButton icon={<ArrowRedoRegular />} onClick={redo} disabled={!redoPossible}>
+                    <CollapsableToolbarButton
+                        icon={<ArrowRedoRegular />}
+                        onClick={redo}
+                        disabled={!redoPossible}
+                        collapsed={collapseC}
+                    >
                         Redo
                     </CollapsableToolbarButton>
 
                     <ToolbarDivider />
 
-                    <ShareDialogButton>Share</ShareDialogButton>
-
-                    <StepScreenshotButton>Screenshot</StepScreenshotButton>
-                    <VideoExportButton>Export video</VideoExportButton>
+                    <ShareDialogButton collapsed={collapseD}>Share</ShareDialogButton>
                 </Toolbar>
             </InPortal>
         </>
@@ -137,7 +170,12 @@ function getSaveButtonState(
     return { type: 'save', text: 'Save', icon: <SaveRegular />, disabled: !isDirty };
 }
 
-const SaveButton: React.FC = () => {
+interface SaveButtonProps {
+    collapsed?: boolean;
+}
+
+const SaveButton: React.FC<SaveButtonProps> = ({ collapsed }) => {
+    const classes = useStyles();
     const isDirty = useIsDirty();
     const setSavedState = useSetSavedState();
     const [saveAsOpen, setSaveAsOpen] = useState(false);
@@ -222,9 +260,14 @@ const SaveButton: React.FC = () => {
                     {(triggerProps: MenuButtonProps) => (
                         <CollapsableSplitButton
                             menuButton={triggerProps}
-                            primaryActionButton={{ onClick: handleClick, disabled: disabled || isSaving }}
+                            primaryActionButton={{
+                                onClick: handleClick,
+                                disabled: disabled || isSaving,
+                                className: classes.noWrapButton,
+                            }}
                             icon={isSaving ? <Spinner size="tiny" /> : icon}
                             appearance="subtle"
+                            collapsed={collapsed}
                         >
                             {isSaving ? 'Publishing…' : text}
                         </CollapsableSplitButton>

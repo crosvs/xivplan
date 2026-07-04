@@ -137,24 +137,47 @@ export function useCrossStepSelection(): CrossStepContextValue {
  * Returns the objects to edit in the Properties panel.
  * When a cross-step selection is active, returns objects from all selected steps.
  * Otherwise returns the selected objects on the current step.
+ *
+ * The current step's objects are read from the live (transient) scene so values
+ * update as the user drags. Other steps are read from the canonical (pre-transient)
+ * scene, since they never change mid-drag -- this keeps a drag on the current step
+ * from re-filtering every other selected step's objects on every mouse-move frame.
  */
 export function useEditableObjects(): readonly SceneObject[] {
-    const { scene, step } = useScene();
+    const { canonicalScene, step, stepIndex } = useScene();
     const [selection] = useSelection();
     const { selection: crossStep } = use(CrossStepContext);
 
-    if (crossStep.size > 0) {
+    const currentStepObjects = useMemo(() => {
+        const ids = crossStep.get(stepIndex);
+        if (ids) {
+            return step.objects.filter((o) => ids.has(o.id));
+        }
+        return crossStep.size > 0 ? [] : getSelectedObjects(step, selection);
+    }, [step, stepIndex, selection, crossStep]);
+
+    const otherStepsObjects = useMemo(() => {
+        if (crossStep.size === 0) {
+            return [];
+        }
+
         const result: SceneObject[] = [];
         for (const [stepIdx, ids] of crossStep) {
-            const s = scene.steps[stepIdx];
+            if (stepIdx === stepIndex) {
+                continue;
+            }
+            const s = canonicalScene.steps[stepIdx];
             if (s) {
                 result.push(...s.objects.filter((o) => ids.has(o.id)));
             }
         }
         return result;
-    }
+    }, [canonicalScene, stepIndex, crossStep]);
 
-    return getSelectedObjects(step, selection);
+    return useMemo(
+        () => (otherStepsObjects.length > 0 ? [...currentStepObjects, ...otherStepsObjects] : currentStepObjects),
+        [currentStepObjects, otherStepsObjects],
+    );
 }
 
 interface ObjectSimilarityKey {
@@ -245,17 +268,24 @@ export function useAvailableFilters(): AvailableFilters {
  * Finds similar objects across all steps based on the active similarity filters.
  * Returns a map of stepIndex → set of matching objectIds.
  * Returns an empty map when no filters are active or the selection is empty/heterogeneous.
+ *
+ * Reads from the canonical (pre-transient) scene rather than the live scene, since
+ * this is a read-only UI derivation that doesn't need to track a drag frame-by-frame --
+ * doing so would re-scan every object on every selected step on every mouse-move.
  */
 export function useSimilarObjects(
     filters: SimilarityFilters,
     positionTolerance = 0,
 ): ReadonlyMap<number, ReadonlySet<number>> {
-    const { scene, step } = useScene();
+    const { canonicalScene, stepIndex } = useScene();
     const [selection] = useSelection();
     const { trackId: filterTrackId, properties: filterProperties, position: filterPosition } = filters;
 
     return useMemo(() => {
         if (!filterTrackId && !filterProperties && !filterPosition) return new Map();
+
+        const step = canonicalScene.steps[stepIndex];
+        if (!step) return new Map();
 
         const selectedObjects = getSelectedObjects(step, selection);
         if (!selectedObjects.length) return new Map();
@@ -275,7 +305,7 @@ export function useSimilarObjects(
 
         const result = new Map<number, Set<number>>();
 
-        scene.steps.forEach((s, stepIdx) => {
+        canonicalScene.steps.forEach((s, stepIdx) => {
             const matches = s.objects.filter((o) => {
                 if (o.type !== firstType) return false;
                 if (trackIds !== null && (!o.trackId || !trackIds.has(o.trackId))) return false;
@@ -297,5 +327,5 @@ export function useSimilarObjects(
         });
 
         return result;
-    }, [scene, step, selection, filterTrackId, filterProperties, filterPosition, positionTolerance]);
+    }, [canonicalScene, stepIndex, selection, filterTrackId, filterProperties, filterPosition, positionTolerance]);
 }

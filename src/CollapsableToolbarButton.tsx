@@ -1,13 +1,19 @@
 import { SplitButton, SplitButtonProps, ToolbarButton, ToolbarButtonProps, Tooltip } from '@fluentui/react-components';
 import React from 'react';
-import { useMedia } from 'react-use';
 
-const WIDE_MEDIA_QUERY = '(min-width: 1250px)';
+export interface CollapsableToolbarButtonProps extends ToolbarButtonProps {
+    /** Hides the text label, keeping only the icon -- an explicit decision from the caller's own
+     * header-stage calculation (see headerStages.ts), rather than a single shared breakpoint,
+     * since each button group now collapses independently in priority order. */
+    collapsed?: boolean;
+}
 
-export const CollapsableToolbarButton: React.FC<ToolbarButtonProps> = ({ children, ...props }) => {
-    const isWide = useMedia(WIDE_MEDIA_QUERY);
-
-    if (isWide) {
+export const CollapsableToolbarButton: React.FC<CollapsableToolbarButtonProps> = ({
+    children,
+    collapsed,
+    ...props
+}) => {
+    if (!collapsed) {
         return <ToolbarButton {...props}>{children}</ToolbarButton>;
     }
 
@@ -18,10 +24,13 @@ export const CollapsableToolbarButton: React.FC<ToolbarButtonProps> = ({ childre
     );
 };
 
-export const CollapsableSplitButton: React.FC<SplitButtonProps> = ({ children, ...props }) => {
-    const isWide = useMedia(WIDE_MEDIA_QUERY);
+export interface CollapsableSplitButtonProps extends SplitButtonProps {
+    /** See CollapsableToolbarButtonProps.collapsed. */
+    collapsed?: boolean;
+}
 
-    if (isWide) {
+export const CollapsableSplitButton: React.FC<CollapsableSplitButtonProps> = ({ children, collapsed, ...props }) => {
+    if (!collapsed) {
         return <SplitButton {...props}>{children}</SplitButton>;
     }
 

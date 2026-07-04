@@ -3,10 +3,10 @@ import {
     Dialog,
     DialogActions,
     DialogContent,
+    DialogProps,
     DialogSurface,
     DialogTitle,
     DialogTrigger,
-    Link,
     makeStyles,
     typographyStyles,
 } from '@fluentui/react-components';
@@ -14,18 +14,13 @@ import React from 'react';
 import { ExternalLink } from './ExternalLink';
 import { HotkeyBlockingDialogBody } from './HotkeyBlockingDialogBody';
 
-export interface AboutDialogProps {
-    className?: string;
-}
+export type AboutDialogProps = Omit<DialogProps, 'children'>;
 
 export const AboutDialog: React.FC<AboutDialogProps> = (props) => {
     const classes = useStyles();
 
     return (
-        <Dialog>
-            <DialogTrigger>
-                <Link {...props}>About</Link>
-            </DialogTrigger>
+        <Dialog {...props}>
             <DialogSurface>
                 <HotkeyBlockingDialogBody>
                     <DialogTitle>About</DialogTitle>

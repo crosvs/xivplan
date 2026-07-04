@@ -1,5 +1,6 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
+import { useMedia, useWindowSize } from 'react-use';
 import { EditModeProvider } from './EditModeProvider';
 import { RegularHotkeyHandler } from './HotkeyHandler';
 import { MainToolbar } from './MainToolbar';
@@ -7,15 +8,19 @@ import { PanelDragProvider } from './PanelDragProvider';
 import { SceneLoadErrorNotifier } from './SceneLoadErrorNotifier';
 import { useScene } from './SceneProvider';
 import { SelectionProvider } from './SelectionProvider';
-import { StepSelect } from './StepSelect';
+import { CombinedPanel } from './panel/CombinedPanel';
 import { DetailsPanel } from './panel/DetailsPanel';
 import { MainPanel } from './panel/MainPanel';
+import { getPanelStageCount } from './panel/panelStages';
+import { PortraitPanels } from './panel/PortraitPanels';
 import { PlaybackProvider, usePlayback, usePlaybackDispatch } from './playback/PlaybackContext';
 import { PlaybackTimeline } from './playback/PlaybackTimeline';
 import { SceneRenderer } from './render/SceneRenderer';
-import { MIN_STAGE_WIDTH } from './theme';
+import { MIN_STAGE_WIDTH, MIN_STAGE_WIDTH_PX } from './theme';
 import { useIsDirty } from './useIsDirty';
+import { usePreviewMode } from './usePreviewMode';
 import { removeFileExtension } from './util';
+import { ViewTransformProvider } from './ViewTransformProvider';
 
 export const MainPage: React.FC = () => {
     return (
@@ -23,7 +28,9 @@ export const MainPage: React.FC = () => {
             <EditModeProvider>
                 <SelectionProvider>
                     <PanelDragProvider>
-                        <MainPageContent />
+                        <ViewTransformProvider>
+                            <MainPageContent />
+                        </ViewTransformProvider>
                     </PanelDragProvider>
                 </SelectionProvider>
             </EditModeProvider>
@@ -62,7 +69,16 @@ const MainPageContent: React.FC = () => {
     // instead of usePlayback() so the entire page subtree doesn't re-render at 60fps.
     const { setPlaybackTime, togglePlay, isPlayingRef } = usePlaybackDispatch();
     const maxStep = scene.steps.length - 1;
-    const [classicMode, setClassicMode] = useState(false);
+    const [previewMode] = usePreviewMode();
+    const isPortrait = useMedia('(orientation: portrait)');
+
+    // Landscape's panel columns auto-size to their own content rather than splitting a directly
+    // measurable "available" share (the canvas's 1fr column absorbs whatever the panels don't
+    // use), so there's no element whose width alone tells us "how much room is there for
+    // panels" the way portrait's shared row does. Approximate it instead: whatever the window
+    // doesn't need for the canvas's own minimum is what's available for panels to grow into.
+    const { width: windowWidth } = useWindowSize();
+    const landscapeStage = getPanelStageCount(windowWidth - MIN_STAGE_WIDTH_PX);
 
     // stepIndexRef captures the step the reducer committed to (e.g. addStep → new step index).
     const stepIndexRef = useRef(stepIndex);
@@ -102,20 +118,24 @@ const MainPageContent: React.FC = () => {
 
             <MainToolbar />
 
-            {/* TODO: make panel collapsable */}
-            <MainPanel />
+            {!previewMode && !isPortrait && landscapeStage !== 1 && <MainPanel />}
 
             <div className={classes.steps}>
-                {classicMode && <StepSelect />}
-                <PlaybackTimeline classicMode={classicMode} onToggleClassicMode={() => setClassicMode((c) => !c)} />
+                <PlaybackTimeline />
             </div>
 
             <div className={classes.stage}>
                 <SceneRenderer />
             </div>
 
-            {/* TODO: make panel collapsable */}
-            <DetailsPanel />
+            {!previewMode &&
+                (isPortrait ? (
+                    <PortraitPanels />
+                ) : landscapeStage === 1 ? (
+                    <CombinedPanel />
+                ) : (
+                    <DetailsPanel split={landscapeStage === 3} />
+                ))}
         </>
     );
 };
@@ -142,6 +162,10 @@ const useStyles = makeStyles({
         gridArea: 'steps',
         display: 'flex',
         flexFlow: 'column',
+        // Without this, content that's wider than the column (e.g. the playback
+        // controls row on a narrow arena) can overflow into the neighboring panel
+        // instead of wrapping/clipping within this grid area.
+        overflow: 'hidden',
         minWidth: MIN_STAGE_WIDTH,
         backgroundColor: tokens.colorNeutralBackground2,
     },
@@ -149,8 +173,11 @@ const useStyles = makeStyles({
         gridArea: 'content',
         display: 'flex',
         flexFlow: 'row',
-        justifyContent: 'center',
-        overflow: 'auto',
+        // The canvas now always fills this container itself (see SceneRenderer's
+        // ResizeObserver-driven fit-to-view), so there's no leftover space to center
+        // within, and no oversized content to natively scroll -- panning/zooming is
+        // handled internally instead, so a native scrollbar here would just be inert.
+        overflow: 'hidden',
         minWidth: MIN_STAGE_WIDTH,
         backgroundColor: tokens.colorNeutralBackground1,
     },

@@ -15,6 +15,13 @@ import { Handle } from './Handle';
 
 export const CONTROL_POINT_BORDER_COLOR = '#00a1ff';
 
+/** Konva node name marking every control-point handle (used by arc/star/donut/line/etc. shapes),
+ * so SceneRenderer's touch handling can recognize "this will handle its own drag" and not also
+ * arm canvas panning for the same touch -- these handles use manual window-level pointer
+ * tracking (see getTransformStart/handleMove below) rather than Konva's declarative `draggable`,
+ * so the usual draggable-node check doesn't see them. */
+export const CONTROL_POINT_NAME = 'control-point-handle';
+
 export enum HandleStyle {
     Square,
     Diamond,
@@ -123,6 +130,7 @@ export function createControlPointManager<T extends Vector2d, S, P = unknown>(
         const getTransformStart = (i: number) => {
             return (e: KonvaEventObject<Event>) => {
                 e.evt.stopPropagation();
+                e.evt.preventDefault();
 
                 const pointerPos = getPointerPos();
                 const handleCornerOffset = e.target.getRelativePointerPosition() ?? { x: 0, y: 0 };
@@ -204,6 +212,7 @@ export function createControlPointManager<T extends Vector2d, S, P = unknown>(
                             {handles.map((handle, i) => (
                                 <Handle
                                     key={i}
+                                    name={CONTROL_POINT_NAME}
                                     x={handle.x}
                                     y={handle.y}
                                     style={handle.style ?? HandleStyle.Square}
