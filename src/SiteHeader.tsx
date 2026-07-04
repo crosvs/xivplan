@@ -25,7 +25,7 @@ import { AboutDialog } from './AboutDialog';
 import { ExternalLink } from './ExternalLink';
 import { useHeaderCollapseState } from './headerStages';
 import { HelpContext } from './HelpContext';
-import { PANEL_WIDTH } from './panel/PanelStyles';
+import { usePreviewMode } from './usePreviewMode';
 import { DarkModeContext } from './ThemeContext';
 import { ToolbarContext } from './ToolbarContext';
 
@@ -46,13 +46,19 @@ const useStyles = makeStyles({
             paddingInlineEnd: tokens.spacingHorizontalS,
         },
     },
+    // Preview mode removes the right panel entirely, so the extra end padding reserved to align
+    // with it (see `root`'s unconditional paddingInlineEnd above) is no longer needed, same
+    // reasoning as `titlePreviewMode` below.
+    rootPreviewMode: {
+        paddingInlineEnd: tokens.spacingHorizontalS,
+    },
     title: {
         display: 'flex',
         alignItems: 'baseline',
         boxSizing: 'border-box',
         paddingLeft: tokens.spacingHorizontalM,
         gap: GAP,
-        width: `calc(${PANEL_WIDTH}px - ${GAP})`,
+        width: `auto`,
         textDecoration: 'none',
 
         // This width exists to align with the left panel below it in the desktop/landscape
@@ -63,6 +69,15 @@ const useStyles = makeStyles({
             paddingLeft: tokens.spacingHorizontalS,
             flexShrink: 0,
         },
+    },
+    // Preview mode removes the left panel entirely (see App.tsx's rootPreviewMode), so the same
+    // alignment reasoning as the portrait override above applies regardless of orientation. Kept
+    // as its own plain (non-media) class rather than folded into a shared selector, matching
+    // App.tsx's rootPreviewMode split -- Griffel buckets media-scoped rules after unconditional
+    // ones, so this must win by being applied later via mergeClasses, not by relying on selector
+    // specificity.
+    titlePreviewMode: {
+        width: 'auto',
     },
     commandBar: {
         flexGrow: 1,
@@ -88,14 +103,15 @@ export const SiteHeader: React.FC<HTMLAttributes<HTMLElement>> = ({ className, .
     const [, setHelpOpen] = useContext(HelpContext);
     const [darkMode, setDarkMode] = useContext(DarkModeContext);
     const [aboutOpen, setAboutOpen] = useState(false);
+    const [previewMode] = usePreviewMode();
     // Reactive to actual available width (see headerStages.ts) rather than tied to portrait
     // orientation -- a narrow *landscape* window needs this collapsed too, and a wide portrait
     // window (e.g. a resized desktop browser) doesn't need it collapsed at all.
     const { collapseE } = useHeaderCollapseState();
 
     return (
-        <header className={mergeClasses(classes.root, className)} {...props}>
-            <div className={classes.title}>
+        <header className={mergeClasses(classes.root, previewMode && classes.rootPreviewMode, className)} {...props}>
+            <div className={mergeClasses(classes.title, previewMode && classes.titlePreviewMode)}>
                 <Text size={500} weight="semibold">
                     XIVPlan
                 </Text>

@@ -4,7 +4,7 @@ import { CSSProperties, useContext } from 'react';
 import { DarkModeContext } from './ThemeContext';
 import { cssPropertiesToStyleString, themeToCssProperties, themeToCssVars, themeToTokensObject } from './themeUtil';
 
-export const MIN_STAGE_WIDTH_PX = 400;
+export const MIN_STAGE_WIDTH_PX = 540;
 export const MIN_STAGE_WIDTH = `${MIN_STAGE_WIDTH_PX}px`;
 
 /**

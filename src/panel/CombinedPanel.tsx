@@ -20,6 +20,13 @@ export interface CombinedPanelProps {
      * for landscape's Stage 1 (see MainPage), where there's only room for one merged panel and
      * no separate left-side MainPanel at all. */
     fill?: boolean;
+
+    /** Caps the landscape (non-fill) width to whatever's actually left over after the canvas's
+     * own minimum width (see MainPage's landscapeStage calculation) -- without this, a fixed
+     * COMBINED_PANEL_WIDTH can together with the canvas's minimum exceed the viewport at narrow
+     * landscape widths, forcing the whole page to overflow horizontally instead of this panel
+     * simply shrinking. Ignored when `fill` is set, since that case already shrinks freely. */
+    maxWidth?: number;
 }
 
 /**
@@ -27,7 +34,7 @@ export interface CombinedPanelProps {
  * one panel -- used whenever there isn't room for two panels side by side at their minimum
  * comfortable width, in either orientation (see panelStages.ts).
  */
-export const CombinedPanel: React.FC<CombinedPanelProps> = ({ fill }) => {
+export const CombinedPanel: React.FC<CombinedPanelProps> = ({ fill, maxWidth }) => {
     const classes = useStyles();
     const [tab, setTab] = useState<Tabs>('objects');
     const [, setEditMode] = useEditMode();
@@ -42,7 +49,10 @@ export const CombinedPanel: React.FC<CombinedPanelProps> = ({ fill }) => {
     };
 
     return (
-        <div className={mergeClasses(classes.wrapper, fill && classes.fill)}>
+        <div
+            className={mergeClasses(classes.wrapper, fill && classes.fill)}
+            style={!fill && maxWidth !== undefined ? { maxWidth } : undefined}
+        >
             <TabList size="small" selectedValue={tab} onTabSelect={(ev, data) => handleTabChanged(data.value as Tabs)}>
                 <Tab value="objects">Objects</Tab>
                 <Tab value="properties">Properties</Tab>
