@@ -25,7 +25,6 @@ import { AboutDialog } from './AboutDialog';
 import { ExternalLink } from './ExternalLink';
 import { useHeaderCollapseState } from './headerStages';
 import { HelpContext } from './HelpContext';
-import { PANEL_WIDTH } from './panel/PanelStyles';
 import { usePreviewMode } from './usePreviewMode';
 import { DarkModeContext } from './ThemeContext';
 import { ToolbarContext } from './ToolbarContext';
