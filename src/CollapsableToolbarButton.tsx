@@ -2,7 +2,10 @@ import { SplitButton, SplitButtonProps, ToolbarButton, ToolbarButtonProps, Toolt
 import React from 'react';
 import { useMedia } from 'react-use';
 
-const WIDE_MEDIA_QUERY = '(min-width: 1250px)';
+// Raised from 1250px: the toolbar now has more content (the preview-mode toggle
+// and its divider), so the old threshold left a ~50px gap where the wide (icon +
+// text) buttons no longer fit and the header overflowed instead of collapsing.
+const WIDE_MEDIA_QUERY = '(min-width: 1320px)';
 
 export const CollapsableToolbarButton: React.FC<ToolbarButtonProps> = ({ children, ...props }) => {
     const isWide = useMedia(WIDE_MEDIA_QUERY);

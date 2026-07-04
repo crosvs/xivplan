@@ -23,20 +23,38 @@ const useStyles = makeStyles({
         right: 0,
         bottom: 0,
         display: 'grid',
-        gridTemplateColumns: `auto minmax(400px, auto) 1fr`,
+        // The steps/timeline row always spans the full width, above the panels/scene row.
+        // The scene column ('1fr') gets all leftover space; panel columns size to their own
+        // content ('auto') instead of splitting remaining space, which used to leave the
+        // right panel's column much wider than the panel itself.
+        gridTemplateColumns: `auto 1fr auto`,
         gridTemplateRows: `min-content min-content 1fr`,
         gridTemplateAreas: `
                 "header     header  header"
-                "left-panel steps   right-panel"
+                "steps      steps   steps"
                 "left-panel content right-panel"
             `,
 
+        // In portrait orientation, panels no longer frame the scene left/right -- they
+        // move below it, stacked side by side across the lower half of the screen.
+        '@media (orientation: portrait)': {
+            gridTemplateColumns: '1fr 1fr',
+            gridTemplateRows: `min-content min-content 1fr 1fr`,
+            gridTemplateAreas: `
+                    "header      header"
+                    "steps       steps"
+                    "content     content"
+                    "left-panel  right-panel"
+                `,
+        },
+
         background: tokens.colorNeutralBackground3,
     },
-    // Applied in preview mode, on top of `root`, to collapse the editor panel columns
-    // so the steps/content column fills the full width.
+    // Applied in preview mode, on top of `root`, to collapse the editor panel columns/rows
+    // so the steps/content area fills the full width regardless of orientation.
     rootPreviewMode: {
         gridTemplateColumns: '1fr',
+        gridTemplateRows: `min-content min-content 1fr`,
         gridTemplateAreas: `
                 "header"
                 "steps"

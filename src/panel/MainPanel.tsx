@@ -1,4 +1,4 @@
-import { makeStyles, Tab, TabList } from '@fluentui/react-components';
+import { makeStyles, Tab, TabList, tokens } from '@fluentui/react-components';
 import React, { useState } from 'react';
 import { EditMode } from '../editMode';
 import { TabActivity } from '../TabActivity';
@@ -56,6 +56,18 @@ const useStyles = makeStyles({
         gridArea: 'left-panel',
         width: `${PANEL_WIDTH}px`,
         userSelect: 'none',
+        backgroundColor: tokens.colorNeutralBackground2,
+        // Without this, this grid item's automatic minimum height defaults to its
+        // content's full (unscrolled) height, which -- in portrait mode, where this
+        // shares a fractional row with the scene -- lets it balloon past its fair
+        // share of the row and squeeze the scene out instead of scrolling internally.
+        overflow: 'hidden',
+
+        // In portrait mode this panel shares a row with the right panel instead of
+        // framing the scene, so it needs to fill whatever width that half gives it.
+        '@media (orientation: portrait)': {
+            width: '100%',
+        },
     },
 
     container: {

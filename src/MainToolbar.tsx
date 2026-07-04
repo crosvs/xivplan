@@ -15,7 +15,7 @@ import {
     ArrowRedoRegular,
     ArrowUndoRegular,
     CloudArrowUpRegular,
-    EyeOffRegular,
+    DocumentEditRegular,
     EyeRegular,
     OpenRegular,
     SaveEditRegular,
@@ -44,6 +44,10 @@ const useStyles = makeStyles({
     toolbar: {
         paddingLeft: 0,
         paddingRight: 0,
+    },
+    noWrapButton: {
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
     },
 });
 
@@ -84,10 +88,10 @@ export const MainToolbar: React.FC = () => {
             <InPortal node={toolbarNode}>
                 <Toolbar className={classes.toolbar}>
                     <CollapsableToolbarButton
-                        icon={previewMode ? <EyeOffRegular /> : <EyeRegular />}
+                        icon={previewMode ? <DocumentEditRegular /> : <EyeRegular />}
                         onClick={() => setPreviewMode((p) => !p)}
                     >
-                        {previewMode ? 'Show editor' : 'Preview mode'}
+                        {previewMode ? 'Editor' : 'Preview'}
                     </CollapsableToolbarButton>
 
                     <ToolbarDivider />
@@ -111,7 +115,7 @@ export const MainToolbar: React.FC = () => {
                     <ShareDialogButton>Share</ShareDialogButton>
 
                     <StepScreenshotButton>Screenshot</StepScreenshotButton>
-                    <VideoExportButton>Export video</VideoExportButton>
+                    <VideoExportButton>Video</VideoExportButton>
                 </Toolbar>
             </InPortal>
         </>
@@ -151,6 +155,7 @@ function getSaveButtonState(
 }
 
 const SaveButton: React.FC = () => {
+    const classes = useStyles();
     const isDirty = useIsDirty();
     const setSavedState = useSetSavedState();
     const [saveAsOpen, setSaveAsOpen] = useState(false);
@@ -235,7 +240,11 @@ const SaveButton: React.FC = () => {
                     {(triggerProps: MenuButtonProps) => (
                         <CollapsableSplitButton
                             menuButton={triggerProps}
-                            primaryActionButton={{ onClick: handleClick, disabled: disabled || isSaving }}
+                            primaryActionButton={{
+                                onClick: handleClick,
+                                disabled: disabled || isSaving,
+                                className: classes.noWrapButton,
+                            }}
                             icon={isSaving ? <Spinner size="tiny" /> : icon}
                             appearance="subtle"
                         >

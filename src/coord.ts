@@ -227,7 +227,10 @@ export function getPointerAngle(pos: Vector2d): number {
 }
 
 export function getPointerPosition(scene: Scene, stage: Stage | undefined | null): Vector2d | null {
-    const pos = stage?.getPointerPosition();
+    // getRelativePointerPosition() (rather than getPointerPosition()) accounts for the
+    // stage's own pan/zoom transform, so this keeps returning the correct scene position
+    // when the view has been panned or zoomed.
+    const pos = stage?.getRelativePointerPosition();
     if (!pos) {
         return null;
     }

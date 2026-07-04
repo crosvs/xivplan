@@ -1,4 +1,4 @@
-import { Divider, makeStyles, mergeClasses, Tab, TabList, typographyStyles } from '@fluentui/react-components';
+import { Divider, makeStyles, mergeClasses, Tab, TabList, tokens, typographyStyles } from '@fluentui/react-components';
 import React, { useState } from 'react';
 import { useMedia } from 'react-use';
 import { TabActivity } from '../TabActivity';
@@ -72,6 +72,18 @@ const useStyles = makeStyles({
         gridArea: 'right-panel',
         flexShrink: '0 !important',
         width: `${PANEL_WIDTH}px`,
+        backgroundColor: tokens.colorNeutralBackground2,
+        // Without this, this grid item's automatic minimum height defaults to its
+        // content's full (unscrolled) height, which -- in portrait mode, where this
+        // shares a fractional row with the scene -- lets it balloon past its fair
+        // share of the row and squeeze the scene out instead of scrolling internally.
+        overflow: 'hidden',
+
+        // In portrait mode this panel shares a row with the left panel instead of
+        // framing the scene, so it needs to fill whatever width that half gives it.
+        '@media (orientation: portrait)': {
+            width: '100%',
+        },
     },
 
     widePanel: {
@@ -81,6 +93,8 @@ const useStyles = makeStyles({
         gridArea: 'right-panel',
         flexShrink: '0 !important',
         height: '100%',
+        overflow: 'hidden',
+        backgroundColor: tokens.colorNeutralBackground2,
     },
 
     header: {
@@ -103,7 +117,10 @@ const useStyles = makeStyles({
     },
 
     shortPanelContent: {
-        height: 'calc(100vh - 48px - 60px)',
+        // This panel's own grid area is now sized by its grid row/cell rather than
+        // spanning from just below the header to the bottom of the viewport, so its
+        // content only needs to account for the TabList's own height, not the header.
+        height: 'calc(100% - 44px)',
         overflow: 'auto',
     },
 });

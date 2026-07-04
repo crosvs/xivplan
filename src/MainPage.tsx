@@ -17,6 +17,7 @@ import { MIN_STAGE_WIDTH } from './theme';
 import { useIsDirty } from './useIsDirty';
 import { usePreviewMode } from './usePreviewMode';
 import { removeFileExtension } from './util';
+import { ViewTransformProvider } from './ViewTransformProvider';
 
 export const MainPage: React.FC = () => {
     return (
@@ -24,7 +25,9 @@ export const MainPage: React.FC = () => {
             <EditModeProvider>
                 <SelectionProvider>
                     <PanelDragProvider>
-                        <MainPageContent />
+                        <ViewTransformProvider>
+                            <MainPageContent />
+                        </ViewTransformProvider>
                     </PanelDragProvider>
                 </SelectionProvider>
             </EditModeProvider>
@@ -153,8 +156,11 @@ const useStyles = makeStyles({
         gridArea: 'content',
         display: 'flex',
         flexFlow: 'row',
-        justifyContent: 'center',
-        overflow: 'auto',
+        // The canvas now always fills this container itself (see SceneRenderer's
+        // ResizeObserver-driven fit-to-view), so there's no leftover space to center
+        // within, and no oversized content to natively scroll -- panning/zooming is
+        // handled internally instead, so a native scrollbar here would just be inert.
+        overflow: 'hidden',
         minWidth: MIN_STAGE_WIDTH,
         backgroundColor: tokens.colorNeutralBackground1,
     },

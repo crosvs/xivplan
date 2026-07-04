@@ -23,7 +23,13 @@ import { CrossStepSelection } from '../CrossStepContext';
 import { useScene } from '../SceneProvider';
 import { AddStepButton, RemoveStepButton, ReorderStepsButton } from '../StepSelect';
 import { useCrossStepSelection, useSelection, useSimilarObjects } from '../selection';
+import { useIsDirty } from '../useIsDirty';
+import { useViewTransform } from '../useViewTransform';
+import { removeFileExtension } from '../util';
+import { MAX_ZOOM, MIN_ZOOM } from '../ViewTransformContext';
 import { usePlayback, usePlaybackDispatch } from './PlaybackContext';
+
+const ZOOM_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].filter((z) => z >= MIN_ZOOM && z <= MAX_ZOOM);
 
 interface PlaybackTimelineProps {
     classicMode: boolean;
@@ -32,9 +38,11 @@ interface PlaybackTimelineProps {
 
 export const PlaybackTimeline: React.FC<PlaybackTimelineProps> = ({ classicMode, onToggleClassicMode }) => {
     const classes = useStyles();
-    const { scene, dispatch } = useScene();
+    const { scene, dispatch, source } = useScene();
     const { state, setPlaybackTime, togglePlay, setSpeed, updateMaxStep } = usePlayback();
     const { isPlaying, playbackTime, speed } = state;
+    const [transform, setTransform] = useViewTransform();
+    const isDirty = useIsDirty();
 
     const stepCount = scene.steps.length;
     const maxStep = stepCount - 1;
@@ -58,7 +66,25 @@ export const PlaybackTimeline: React.FC<PlaybackTimelineProps> = ({ classicMode,
         setSpeed(parseFloat(_.target.value));
     };
 
-    const stepLabel = `Step ${currentStepIndex + 1} / ${stepCount}`;
+    // Zooms around the canvas's own origin rather than the current viewport center --
+    // simple to compute without needing this component to know the canvas's pixel size,
+    // and wheel/pinch zoom already cover the "zoom toward what I'm looking at" case.
+    const handleZoomChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const newScale = parseFloat(e.target.value);
+        setTransform((t) => ({
+            scale: newScale,
+            x: t.x * (newScale / t.scale),
+            y: t.y * (newScale / t.scale),
+        }));
+    };
+
+    const zoomPercent = Math.round(transform.scale * 100);
+    const isZoomPreset = ZOOM_PRESETS.some((z) => Math.round(z * 100) === zoomPercent);
+
+    const planName = source ? removeFileExtension(source.name) : undefined;
+    const stepLabel = planName
+        ? `Step ${currentStepIndex + 1} / ${stepCount} - ${planName}${isDirty ? ' ●' : ''}`
+        : `Step ${currentStepIndex + 1} / ${stepCount}`;
 
     return (
         <div className={classes.root}>
@@ -79,9 +105,30 @@ export const PlaybackTimeline: React.FC<PlaybackTimelineProps> = ({ classicMode,
                     <Button appearance="subtle" icon={<ArrowResetRegular />} onClick={handleReset} size="small" />
                 </Tooltip>
 
-                <Label className={classes.stepLabel}>{stepLabel}</Label>
+                <Tooltip
+                    content={planName ? (isDirty ? `${planName} (unsaved changes)` : planName) : stepLabel}
+                    relationship="label"
+                    withArrow
+                >
+                    <Label className={classes.stepLabel}>{stepLabel}</Label>
+                </Tooltip>
 
                 <div className={classes.speedWrapper}>
+                    <Label className={classes.speedLabel}>Zoom</Label>
+                    <Select
+                        value={(zoomPercent / 100).toString()}
+                        onChange={handleZoomChange}
+                        size="small"
+                        className={classes.speedSelect}
+                    >
+                        {!isZoomPreset && <option value={zoomPercent / 100}>{zoomPercent}%</option>}
+                        {ZOOM_PRESETS.map((z) => (
+                            <option key={z} value={z}>
+                                {Math.round(z * 100)}%
+                            </option>
+                        ))}
+                    </Select>
+
                     <Label className={classes.speedLabel}>Speed</Label>
                     <Select
                         value={speed.toString()}
