@@ -16,7 +16,6 @@ import {
     Input,
     MessageBar,
     MessageBarBody,
-    Spinner,
     TableColumnDefinition,
     TableColumnId,
     TableRowIdContextProvider,
@@ -45,7 +44,10 @@ import {
 } from '@fluentui/react-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAsyncFn } from 'react-use';
+import { CircularRelayIndicator } from './CircularRelayIndicator';
+import { CONNECTIVITY_STATUS_LABELS } from './relayStatusLabels';
 import { useNostrPubkey } from './useNostrPubkey';
+import { useRelayStatus } from './useRelayStatus';
 import {
     NostrPlanInfo,
     deletePlan,
@@ -156,6 +158,11 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         gap: tokens.spacingVerticalS,
     },
+    vaultLoading: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spacingHorizontalS,
+    },
     nameCell: {
         display: 'flex',
         alignItems: 'center',
@@ -236,6 +243,7 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
 }) => {
     const classes = useStyles();
     const { dispatchToast } = useToastController();
+    const relayStatus = useRelayStatus();
 
     const ownPubkey = useNostrPubkey();
 
@@ -555,7 +563,16 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                         <Button
                             size="small"
                             appearance="subtle"
-                            icon={vaultState.loading ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
+                            icon={
+                                vaultState.loading ? (
+                                    <CircularRelayIndicator
+                                        relayStatus={relayStatus}
+                                        labels={CONNECTIVITY_STATUS_LABELS}
+                                    />
+                                ) : (
+                                    <ArrowClockwiseRegular />
+                                )
+                            }
                             disabled={vaultState.loading}
                             onClick={() => currentPubkey && loadVault(currentPubkey, undefined, true)}
                         />
@@ -643,7 +660,10 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
             )}
 
             {vaultState.loading && vaultPlans.length === 0 ? (
-                <Spinner size="small" label="Loading vault…" />
+                <div className={classes.vaultLoading}>
+                    <CircularRelayIndicator relayStatus={relayStatus} labels={CONNECTIVITY_STATUS_LABELS} />
+                    <Text>Loading vault…</Text>
+                </div>
             ) : vaultState.error && vaultPlans.length === 0 ? (
                 <div className={classes.vaultError}>
                     <MessageBar intent="error">
@@ -744,7 +764,14 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                                         disabled={vaultState.loading}
                                         onClick={() => currentPubkey && loadVault(currentPubkey, vaultUntil)}
                                     >
-                                        {vaultState.loading ? <Spinner size="tiny" /> : 'Load more'}
+                                        {vaultState.loading ? (
+                                            <CircularRelayIndicator
+                                                relayStatus={relayStatus}
+                                                labels={CONNECTIVITY_STATUS_LABELS}
+                                            />
+                                        ) : (
+                                            'Load more'
+                                        )}
                                     </Button>
                                 </div>
                             )}
@@ -798,7 +825,14 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                         <Button
                             appearance="primary"
                             disabled={!duplicateName.trim() || duplicateState.loading}
-                            icon={duplicateState.loading ? <Spinner size="tiny" /> : undefined}
+                            icon={
+                                duplicateState.loading ? (
+                                    <CircularRelayIndicator
+                                        relayStatus={relayStatus}
+                                        labels={CONNECTIVITY_STATUS_LABELS}
+                                    />
+                                ) : undefined
+                            }
                             onClick={startDuplicate}
                         >
                             {duplicateState.loading ? 'Duplicating…' : 'Duplicate'}
@@ -865,7 +899,14 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                         <Button
                             appearance="primary"
                             disabled={!editName.trim() || editState.loading || !editHasChanges}
-                            icon={editState.loading ? <Spinner size="tiny" /> : undefined}
+                            icon={
+                                editState.loading ? (
+                                    <CircularRelayIndicator
+                                        relayStatus={relayStatus}
+                                        labels={CONNECTIVITY_STATUS_LABELS}
+                                    />
+                                ) : undefined
+                            }
                             onClick={startEdit}
                         >
                             {editState.loading ? 'Saving…' : 'Save'}

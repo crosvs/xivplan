@@ -1,9 +1,31 @@
-import { makeStyles, mergeClasses, Spinner, Toaster, tokens } from '@fluentui/react-components';
-import React, { PropsWithChildren, Suspense } from 'react';
+import {
+    makeStyles,
+    mergeClasses,
+    Spinner,
+    Toast,
+    ToastBody,
+    Toaster,
+    ToastTitle,
+    tokens,
+    useToastController,
+} from '@fluentui/react-components';
+import React, { PropsWithChildren, Suspense, useEffect } from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
-import { createBrowserRouter, createRoutesFromElements, Outlet, Route, RouterProvider } from 'react-router-dom';
+import {
+    createBrowserRouter,
+    createRoutesFromElements,
+    Outlet,
+    Route,
+    RouterProvider,
+    useLocation,
+} from 'react-router-dom';
+import { CircularRelayIndicator } from './file/CircularRelayIndicator';
 import { DirtyProvider } from './DirtyProvider';
-import { useSceneFromUrl, useSourceFromUrl } from './file/share';
+import { consensusThreshold, consumeNostrFetchedConsensus } from './file/nostr';
+import { FETCH_STATUS_LABELS } from './file/relayStatusLabels';
+import { NOSTR_PREFIX, useSceneFromUrl, useSourceFromUrl } from './file/share';
+import { useConsensusProgress } from './file/useConsensusProgress';
+import { useFetchStatus } from './file/useFetchStatus';
 import { FileOpenPage } from './FileOpenPage';
 import { HelpProvider } from './HelpProvider';
 import { MainPage } from './MainPage';
@@ -118,13 +140,61 @@ const BaseProviders: React.FC<PropsWithChildren> = ({ children }) => {
 
 const LoadingFallback: React.FC = () => {
     const classes = useStyles();
+    const { hash } = useLocation();
+    const isNostrFetch = hash.startsWith(NOSTR_PREFIX);
+    const fetchProgress = useConsensusProgress();
+    const fetchStatus = useFetchStatus();
 
     return (
         <div className={classes.loading}>
             <p>Fetching plan</p>
-            <Spinner />
+            {isNostrFetch ? (
+                <CircularRelayIndicator
+                    progress={fetchProgress}
+                    relayStatus={fetchStatus}
+                    labels={FETCH_STATUS_LABELS}
+                    size={40}
+                    style={{ marginTop: tokens.spacingVerticalM }}
+                />
+            ) : (
+                <Spinner style={{ margin: tokens.spacingVerticalM }} />
+            )}
         </div>
     );
+};
+
+/**
+ * Warns (via toast) when a plan loaded from a share URL fell short of {@link consensusThreshold} —
+ * i.e. the content came back without enough relays agreeing on it, so it may not be the latest
+ * version. Silent when consensus was reached, or when the current URL isn't a Nostr share link.
+ */
+const NostrConsensusWarning: React.FC = () => {
+    const { dispatchToast } = useToastController();
+
+    useEffect(() => {
+        // Consuming read: guards against React StrictMode's intentional double-invoke of this
+        // effect in development (harmless in production, where that double-invoke doesn't
+        // happen) — the second invocation finds the cache already cleared and does nothing.
+        const consensus = consumeNostrFetchedConsensus();
+        if (!consensus) return;
+        const { agreeingRelays, totalRelays } = consensus;
+        if (agreeingRelays >= consensusThreshold(totalRelays)) return;
+
+        dispatchToast(
+            <Toast>
+                <ToastTitle>
+                    Loaded from {agreeingRelays}/{totalRelays} relays
+                </ToastTitle>
+                <ToastBody>This may not be the latest version — not enough relays agreed in time.</ToastBody>
+            </Toast>,
+            { intent: 'warning' },
+        );
+        // Runs once per successful resolution of the Suspense boundary this is nested under —
+        // that's exactly when a fresh consumeNostrFetchedConsensus() value becomes available.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    return null;
 };
 
 const Layout: React.FC = () => {
@@ -152,6 +222,7 @@ const Root: React.FC = () => {
                 onDrop={onDrop}
             >
                 <Toaster position="top" />
+                <NostrConsensusWarning />
                 <SiteHeader className={classes.header} />
                 <Outlet />
             </div>

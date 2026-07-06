@@ -9,9 +9,9 @@ import {
     Field,
     MessageBar,
     MessageBarBody,
-    Spinner,
     Textarea,
     Toast,
+    ToastBody,
     ToastTitle,
     Tooltip,
     makeStyles,
@@ -28,8 +28,12 @@ import {
 import React, { useRef, useState } from 'react';
 import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
 import { useAsyncFn } from 'react-use';
+import { CircularRelayIndicator } from './CircularRelayIndicator';
+import { RelayFetchList } from './RelayFetchList';
 import { RelayPublishList } from './RelayPublishList';
-import { RelayStatusDot } from './RelayStatusDot';
+import { CONNECTIVITY_STATUS_LABELS, FETCH_STATUS_LABELS, PUBLISH_STATUS_LABELS } from './relayStatusLabels';
+import { useConsensusProgress, usePublishProgress } from './useConsensusProgress';
+import { useFetchStatus } from './useFetchStatus';
 import { useRelayStatus } from './useRelayStatus';
 import { useNostrPubkey } from './useNostrPubkey';
 import { useLoadScene, useScene, useSetSource } from '../SceneProvider';
@@ -39,6 +43,7 @@ import { useConfirmUnsavedChanges } from './confirm';
 import { NostrVaultList } from './NostrVaultList';
 import {
     NostrPlanInfo,
+    consensusThreshold,
     exportSecretKeyBlob,
     fetchPlan,
     generateNewKey,
@@ -235,6 +240,7 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
     const [selectedPlan, setSelectedPlan] = useState<NostrPlanInfo | undefined>(undefined);
     const [visibility, setVisibility] = useState<'public' | 'private'>(() => getInitialVisibility(source));
     const relayStatus = useRelayStatus();
+    const publishProgress = usePublishProgress();
     const { dispatchToast } = useToastController();
     const [publishedUrl, setPublishedUrl] = useState('');
 
@@ -330,11 +336,25 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
                         </>
                     ) : (
                         <>
-                            <RelayStatusDot status={relayStatus} style={{ marginRight: tokens.spacingHorizontalXS }} />
+                            {!saveState.loading && (
+                                <CircularRelayIndicator
+                                    relayStatus={relayStatus}
+                                    labels={CONNECTIVITY_STATUS_LABELS}
+                                    style={{ marginRight: tokens.spacingHorizontalXS }}
+                                />
+                            )}
                             <Button
                                 appearance="primary"
                                 disabled={!canSave || saveState.loading}
-                                icon={saveState.loading ? <Spinner size="tiny" /> : undefined}
+                                icon={
+                                    saveState.loading ? (
+                                        <CircularRelayIndicator
+                                            progress={publishProgress}
+                                            relayStatus={relayStatus}
+                                            labels={PUBLISH_STATUS_LABELS}
+                                        />
+                                    ) : undefined
+                                }
                                 onClick={save}
                             >
                                 {saveState.loading ? 'Publishing…' : actionLabel}
@@ -369,12 +389,15 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
     const [selectedPubkey, setSelectedPubkey] = useState<string | null>(null);
     const selectedIsLocked =
         selectedItem !== undefined && selectedItem.visibility === 'private' && selectedPubkey !== ownPubkey;
+    const { dispatchToast } = useToastController();
+    const fetchProgress = useConsensusProgress();
+    const fetchStatus = useFetchStatus();
 
     const [openState, openPlan] = useAsyncFn(
         async (pubkey: string, id: string) => {
             if (isDirty && !(await confirmUnsavedChanges())) return;
 
-            const { scene, visibility, name } = await fetchPlan(pubkey, id);
+            const { scene, visibility, name, agreeingRelays, totalRelays } = await fetchPlan(pubkey, id);
             const nostrSource = { type: 'nostr' as const, id, name, pubkey, visibility };
 
             history.replaceState(null, '', getNostrShareUrl(pubkey, id));
@@ -382,8 +405,20 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
             loadScene(scene);
             setSource(nostrSource);
             dismissDialog();
+
+            if (agreeingRelays < consensusThreshold(totalRelays)) {
+                dispatchToast(
+                    <Toast>
+                        <ToastTitle>
+                            Loaded from {agreeingRelays}/{totalRelays} relays
+                        </ToastTitle>
+                        <ToastBody>This may not be the latest version — not enough relays agreed in time.</ToastBody>
+                    </Toast>,
+                    { intent: 'warning' },
+                );
+            }
         },
-        [isDirty, loadScene, setSource, dismissDialog, confirmUnsavedChanges],
+        [isDirty, loadScene, setSource, dismissDialog, confirmUnsavedChanges, dispatchToast],
     );
 
     return (
@@ -401,9 +436,12 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
             />
 
             {openState.error && (
-                <MessageBar intent="error">
-                    <MessageBarBody>{String(openState.error)}</MessageBarBody>
-                </MessageBar>
+                <>
+                    <MessageBar intent="error">
+                        <MessageBarBody>{String(openState.error)}</MessageBarBody>
+                    </MessageBar>
+                    <RelayFetchList />
+                </>
             )}
 
             {renderModal()}
@@ -413,7 +451,15 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
                     <Button
                         appearance="primary"
                         disabled={!selectedItem || openState.loading || !selectedPubkey || selectedIsLocked}
-                        icon={openState.loading ? <Spinner size="tiny" /> : undefined}
+                        icon={
+                            openState.loading ? (
+                                <CircularRelayIndicator
+                                    progress={fetchProgress}
+                                    relayStatus={fetchStatus}
+                                    labels={FETCH_STATUS_LABELS}
+                                />
+                            ) : undefined
+                        }
                         onClick={() => {
                             if (selectedItem && selectedPubkey) {
                                 openPlan(selectedPubkey, selectedItem.id);

@@ -9,7 +9,6 @@ import {
     Field,
     MessageBar,
     MessageBarBody,
-    Spinner,
     Tab,
     TabList,
     Textarea,
@@ -34,10 +33,12 @@ import { sceneToText } from '../file';
 import type { Scene } from '../scene';
 import { useIsDirty, useSetSavedState } from '../useIsDirty';
 import { getNostrShareUrl, getPublishActionLabel, NostrPlanInfo, publishPlan } from './nostr';
+import { CircularRelayIndicator } from './CircularRelayIndicator';
 import { KeySection } from './FileDialogNostr';
 import { NostrVaultList } from './NostrVaultList';
 import { RelayPublishList } from './RelayPublishList';
-import { RelayStatusDot } from './RelayStatusDot';
+import { CONNECTIVITY_STATUS_LABELS, PUBLISH_STATUS_LABELS } from './relayStatusLabels';
+import { usePublishProgress } from './useConsensusProgress';
 import { useRelayStatus } from './useRelayStatus';
 import { useNostrPubkey } from './useNostrPubkey';
 import { DownloadButton } from './DownloadButton';
@@ -177,6 +178,7 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
     const setSource = useSetSource();
     const setSavedState = useSetSavedState();
     const relayStatus = useRelayStatus();
+    const publishProgress = usePublishProgress();
     const { dispatchToast } = useToastController();
     const ownPubkey = useNostrPubkey();
 
@@ -328,11 +330,25 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
                         </>
                     ) : (
                         <>
-                            <RelayStatusDot status={relayStatus} style={{ marginRight: 'auto' }} />
+                            {!publishState.loading && (
+                                <CircularRelayIndicator
+                                    relayStatus={relayStatus}
+                                    labels={CONNECTIVITY_STATUS_LABELS}
+                                    style={{ marginRight: 'auto' }}
+                                />
+                            )}
                             <Button
                                 appearance="primary"
                                 disabled={!canUpload || publishState.loading}
-                                icon={publishState.loading ? <Spinner size="tiny" /> : undefined}
+                                icon={
+                                    publishState.loading ? (
+                                        <CircularRelayIndicator
+                                            progress={publishProgress}
+                                            relayStatus={relayStatus}
+                                            labels={PUBLISH_STATUS_LABELS}
+                                        />
+                                    ) : undefined
+                                }
                                 onClick={publish}
                             >
                                 {publishState.loading ? 'Uploading…' : actionLabel}

@@ -12,13 +12,30 @@
  */
 
 import localforage from 'localforage';
-import { finalizeEvent, generateSecretKey, getPublicKey, nip19, nip44, SimplePool } from 'nostr-tools';
+import { finalizeEvent, generateSecretKey, getPublicKey, nip19, nip44, verifyEvent } from 'nostr-tools';
 import type { NostrEvent } from 'nostr-tools';
+import { AbstractSimplePool } from 'nostr-tools/pool';
 import { jsonToScene, sceneToJson } from '../file';
 import type { NostrFileSource } from '../SceneProvider';
 import type { Scene } from '../scene';
 
-export const NOSTR_RELAYS = ['wss://relay.nostr.band', 'wss://nos.lol', 'wss://relay.damus.io'];
+export const NOSTR_RELAYS = [
+    'wss://relay.nostr.band',
+    'wss://nos.lol',
+    'wss://relay.damus.io',
+    'wss://relay.primal.net',
+    'wss://nostr.mom',
+];
+
+/**
+ * Number of relays that must agree on the same event (with no higher-`created_at` challenger)
+ * before {@link fanGet} stops waiting on stragglers. A strict majority means a plan is only ever
+ * treated as "properly" saved/read once more relays hold that version than don't — anything short
+ * of that leaves room for a stale-relay minority to look like consensus.
+ */
+export function consensusThreshold(relayCount: number): number {
+    return Math.floor(relayCount / 2) + 1;
+}
 
 /** Kind for index events — metadata and pointer to the data event. */
 export const PLAN_KIND = 30078;
@@ -29,22 +46,58 @@ export const PLAN_DATA_KIND = 30079;
 /** Incremented when the event structure changes in a backwards-incompatible way. */
 export const XIVPLAN_FORMAT_VERSION = 1;
 
-/** Per-relay timeout for read operations (ms). */
-const RELAY_TIMEOUT_MS = 6000;
+/**
+ * Per-relay timeout for read operations (ms). Also the pool's `maxWaitForConnection` budget (see
+ * `_pool` below) — every other relay-facing timeout in this file derives from this one constant so
+ * they can't drift out of sync with each other the way the hardcoded values here once did.
+ */
+const RELAY_TIMEOUT_MS = 5000;
+
+/**
+ * Extra time {@link fanGet} (for reads) and the publish race (for writes) wait beyond
+ * RELAY_TIMEOUT_MS before giving up. RELAY_TIMEOUT_MS is also the pool's `maxWaitForConnection`
+ * budget, so a relay that takes the full RELAY_TIMEOUT_MS just to open its WebSocket would
+ * otherwise have no time left to actually answer — this grace period is what's left over for the
+ * query/response (or the publish OK) after a maximal-length connection.
+ */
+const QUERY_GRACE_MS = 2000;
+
+/** Outer race timeout for a single relay's publish attempt — see {@link QUERY_GRACE_MS}. */
+const PUBLISH_TIMEOUT_MS = RELAY_TIMEOUT_MS + QUERY_GRACE_MS;
 
 // Single long-lived pool — connections are reused across operations.
-const _pool = new SimplePool();
+// Built on AbstractSimplePool rather than SimplePool because SimplePool's constructor type
+// only exposes enablePing/enableReconnect — it hardcodes maxWaitForConnection to 3000ms, which
+// (once a per-call `maxWait` exceeds it) derives the actual connection timeout as
+// max(maxWait * 0.8, maxWait - 1000). For our 6000ms maxWait that silently caps the WebSocket
+// handshake at 5000ms. Passing maxWaitForConnection explicitly keeps the full RELAY_TIMEOUT_MS
+// budget available for slow-to-connect relays.
+const _pool = new AbstractSimplePool({
+    verifyEvent,
+    maxWaitForConnection: RELAY_TIMEOUT_MS,
+    onRelayConnectionSuccess: (url) => _setHealth(url, 'connected'),
+    onRelayConnectionFailure: (url) => _setHealth(url, 'error'),
+});
 
 // ── Shared relay status ───────────────────────────────────────────────────────
 
-export type RelayHealth = 'checking' | 'connected' | 'error';
+export type RelayHealth = 'checking' | 'connected' | 'skipped' | 'stale' | 'error';
 
 const _health = new Map<string, RelayHealth>(NOSTR_RELAYS.map((url) => [url, 'checking']));
 const _listeners = new Set<() => void>();
 
+// Cached snapshot array — getRelayStatus() feeds React's useSyncExternalStore, which requires a
+// stable (Object.is-equal) reference between calls unless the store actually changed. Some
+// updates (e.g. the pool's onRelayConnectionSuccess/Failure hooks) can fire synchronously from
+// deep inside another component's render, so relying on useState+useEffect here would risk a
+// "setState while rendering a different component" warning; useSyncExternalStore is the pattern
+// React provides specifically for stores that may mutate outside of React's own render cycle.
+let _healthSnapshot: Array<{ url: string; status: RelayHealth }> | null = null;
+
 function _setHealth(url: string, h: RelayHealth): void {
     if (_health.get(url) === h) return;
     _health.set(url, h);
+    _healthSnapshot = null;
     for (const fn of _listeners) fn();
 }
 
@@ -56,7 +109,179 @@ export function subscribeRelayStatus(fn: () => void): () => void {
 }
 
 export function getRelayStatus(): Array<{ url: string; status: RelayHealth }> {
-    return NOSTR_RELAYS.map((url) => ({ url, status: _health.get(url) ?? 'checking' }));
+    _healthSnapshot ??= NOSTR_RELAYS.map((url) => ({ url, status: _health.get(url) ?? 'checking' }));
+    return _healthSnapshot;
+}
+
+// ── Live fetch status ────────────────────────────────────────────────────────
+// Tracks the in-progress `fanGet` call, if any — distinct from `_health` above, which reflects
+// general relay connectivity rather than "did this specific fetch hear back from this relay".
+// Reset at the start of each fanGet call, so only the most recent fetch's progress is visible.
+
+const _fetchStatus = new Map<string, RelayHealth>();
+const _fetchListeners = new Set<() => void>();
+let _fetchSnapshot: Array<{ url: string; status: RelayHealth }> | null = null;
+
+// Bumped by every UI-tracked fanGet call on start, so an older call whose fetch is still running
+// can tell it's no longer the latest and stop writing to the shared stores above — otherwise two
+// concurrent tracked fetches (e.g. opening a second plan before the first resolves) would each
+// think they own `_fetchStatus`/`_fetchProgress` and stomp each other's display.
+let _fetchGeneration = 0;
+
+function _resetFetchStatus(relays: string[]): void {
+    _fetchStatus.clear();
+    for (const relay of relays) _fetchStatus.set(relay, 'checking');
+    _fetchSnapshot = null;
+    for (const fn of _fetchListeners) fn();
+}
+
+function _setFetchStatus(relay: string, status: RelayHealth): void {
+    _fetchStatus.set(relay, status);
+    _fetchSnapshot = null;
+    for (const fn of _fetchListeners) fn();
+}
+
+export function subscribeFetchStatus(fn: () => void): () => void {
+    _fetchListeners.add(fn);
+    return () => {
+        _fetchListeners.delete(fn);
+    };
+}
+
+export function getFetchStatus(): Array<{ url: string; status: RelayHealth }> {
+    _fetchSnapshot ??= NOSTR_RELAYS.map((url) => ({ url, status: _fetchStatus.get(url) ?? 'checking' }));
+    return _fetchSnapshot;
+}
+
+// ── Live consensus progress ──────────────────────────────────────────────────
+// A staged view of an in-progress fetch or publish: how many relays currently agree/confirmed,
+// out of how many are needed. `createProgressStore` is shared between the two — a fetch (fanGet)
+// and a publish (publishEventPair) are both "wait for enough relays to agree" operations, just
+// with a different source of truth for what counts as agreement.
+
+export interface ConsensusProgress {
+    /** Relays currently agreeing/confirmed so far. */
+    agreeing: number;
+    /** Relays required to treat this as settled. */
+    threshold: number;
+    /** Total relays queried. */
+    total: number;
+    status: 'pending' | 'reached' | 'short';
+}
+
+function createProgressStore() {
+    let progress: ConsensusProgress = { agreeing: 0, threshold: 0, total: 0, status: 'pending' };
+    const listeners = new Set<() => void>();
+
+    function notify(): void {
+        for (const fn of listeners) fn();
+    }
+
+    return {
+        reset(total: number, threshold: number): void {
+            progress = { agreeing: 0, threshold, total, status: 'pending' };
+            notify();
+        },
+        update(agreeing: number): void {
+            if (progress.status !== 'pending' || agreeing <= progress.agreeing) return;
+            progress = { ...progress, agreeing };
+            notify();
+        },
+        finish(outcome: 'reached' | 'short', agreeing: number): void {
+            progress = { ...progress, agreeing, status: outcome };
+            notify();
+        },
+        subscribe(fn: () => void): () => void {
+            listeners.add(fn);
+            return () => {
+                listeners.delete(fn);
+            };
+        },
+        get(): ConsensusProgress {
+            return progress;
+        },
+    };
+}
+
+const _fetchProgress = createProgressStore();
+export const subscribeConsensusProgress = _fetchProgress.subscribe;
+export const getConsensusProgress = _fetchProgress.get;
+
+const _publishProgress = createProgressStore();
+export const subscribePublishProgress = _publishProgress.subscribe;
+export const getPublishProgress = _publishProgress.get;
+
+// ── Relay size limits (NIP-11) ─────────────────────────────────────────────────
+// Relays advertise a max message size via their NIP-11 info document. Checking it before
+// publishing lets us skip a relay we already know will reject the event on size, instead of
+// spending a full publish round-trip just to get an `OK false "invalid: event too large"` back.
+// That NIP-11 figure is only a hint, though — nos.lol/nostr.mom have both been observed rejecting
+// events well under their advertised max_message_length, so `learnSizeLimitFromRejection` tightens
+// a relay's cached limit from real rejections as they happen, on top of whatever NIP-11 claims.
+
+interface RelayLimits {
+    /** Max size, in bytes, of a full `["EVENT", {...}]` wire message. Undefined if unknown. */
+    maxMessageLength?: number;
+}
+
+const _relayLimitsCache = new Map<string, RelayLimits>();
+
+function relayInfoUrl(relay: string): string {
+    return relay.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
+}
+
+async function fetchRelayLimits(relay: string): Promise<RelayLimits> {
+    const cached = _relayLimitsCache.get(relay);
+    if (cached) return cached;
+    let limits: RelayLimits = {};
+    try {
+        const res = await fetch(relayInfoUrl(relay), {
+            headers: { Accept: 'application/nostr+json' },
+            signal: AbortSignal.timeout(2500),
+        });
+        const info = await res.json();
+        if (typeof info?.limitation?.max_message_length === 'number') {
+            limits = { maxMessageLength: info.limitation.max_message_length };
+        }
+    } catch {
+        // No NIP-11 info available — leave unset. We simply won't be able to skip this relay
+        // proactively; it still gets a normal publish/fetch attempt like any other.
+    }
+    _relayLimitsCache.set(relay, limits);
+    return limits;
+}
+
+/**
+ * Cache-only lookup — never triggers a network request. Publish/fetch's size-based skip must
+ * never block the hot path on a fresh NIP-11 round-trip (a relay that's slow or unreachable for
+ * *that* would defeat the entire point of skipping it quickly); it only benefits from limits
+ * `probeRelays()` has already warmed in the background. Unknown relays just don't get skipped.
+ */
+function peekRelayLimits(relay: string): RelayLimits {
+    return _relayLimitsCache.get(relay) ?? {};
+}
+
+/** The exact bytes a relay receives for this event — matches nostr-tools' own `publish()` framing. */
+function wireEventSize(event: NostrEvent): number {
+    return new TextEncoder().encode('["EVENT",' + JSON.stringify(event) + ']').length;
+}
+
+/** Matches a NIP-01 `OK false <reason>` reason that rejects an event specifically for its size. */
+const SIZE_REJECTION_PATTERN = /too large|too big|max.{0,20}(size|length)|size.{0,20}(exceed|limit)/i;
+
+/**
+ * A relay's advertised NIP-11 `max_message_length` is only ever a hint — some relays enforce a
+ * tighter limit in practice than the one they publish (or publish none at all). When a publish is
+ * rejected with a size-related reason, tighten this relay's cached limit to just below the size we
+ * know it just refused, so later publish/fetch calls skip it instead of repeating a doomed attempt.
+ */
+function learnSizeLimitFromRejection(relay: string, event: NostrEvent, reason: string): void {
+    if (!SIZE_REJECTION_PATTERN.test(reason)) return;
+    const learned = wireEventSize(event) - 1;
+    const existing = _relayLimitsCache.get(relay)?.maxMessageLength;
+    if (existing === undefined || learned < existing) {
+        _relayLimitsCache.set(relay, { maxMessageLength: learned });
+    }
 }
 
 let _probing = false;
@@ -73,11 +298,14 @@ export async function probeRelays(): Promise<void> {
         await Promise.allSettled(
             NOSTR_RELAYS.map(async (relay) => {
                 try {
-                    await _pool.get([relay], { kinds: [PLAN_KIND], since: futureTs }, { maxWait: 5000 });
+                    await _pool.get([relay], { kinds: [PLAN_KIND], since: futureTs }, { maxWait: RELAY_TIMEOUT_MS });
                     _setHealth(relay, 'connected');
                 } catch {
                     _setHealth(relay, 'error');
                 }
+                // Fire-and-forget — warms the limits cache so a later publish doesn't have to wait
+                // on NIP-11 round-trips before it can even start.
+                void fetchRelayLimits(relay);
             }),
         );
     } finally {
@@ -111,6 +339,45 @@ function base64UrlToBytes(b64url: string): Uint8Array {
     const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
     const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
     return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+}
+
+// ── Compression ───────────────────────────────────────────────────────────────
+// Some public relays silently drop events over a size limit well under what a complex plan's
+// JSON serializes to (confirmed: nos.lol and nostr.mom close the connection with no error message
+// for a ~390KB event, while relay.damus.io/relay.primal.net accept it fine). Gzipping the JSON
+// before it goes into `content` buys real headroom for repetitive plan data without touching the
+// event/consensus model at all.
+
+/** Compression Streams API support (Chrome/Edge 80+, Firefox 113+, Safari 16.4+). */
+function supportsCompression(): boolean {
+    return typeof CompressionStream !== 'undefined' && typeof DecompressionStream !== 'undefined';
+}
+
+async function gzipCompress(text: string): Promise<Uint8Array> {
+    const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function gzipDecompress(bytes: Uint8Array): Promise<string> {
+    const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(stream).text();
+}
+
+/**
+ * Gzips `json` and base64url-encodes it for storage in an event's `content`, but only when that's
+ * actually smaller — gzip's framing overhead can make already-tiny plans larger, not smaller.
+ * Falls back to the plain JSON (uncompressed) on unsupported browsers or any compression failure.
+ */
+async function compressForStorage(json: string): Promise<{ content: string; compressed: boolean }> {
+    if (!supportsCompression()) return { content: json, compressed: false };
+    try {
+        const gzipped = bytesToBase64Url(await gzipCompress(json));
+        return gzipped.length < json.length
+            ? { content: gzipped, compressed: true }
+            : { content: json, compressed: false };
+    } catch {
+        return { content: json, compressed: false };
+    }
 }
 
 /** Random 8-byte plan id (16 hex chars) — used as the Nostr d-tag. Unique enough within one author's namespace. */
@@ -258,34 +525,234 @@ export function sanitizePlanName(name: string): string {
 
 // ── Fan-fetch helpers (parallel, deduplicated, status-tracking) ───────────────
 
-async function fanGet(
-    filter: Parameters<SimplePool['get']>[1],
-    relays: string[] = NOSTR_RELAYS,
-): Promise<NostrEvent | null> {
-    const results = await Promise.allSettled(
-        relays.map(async (relay) => {
-            try {
-                const event = await _pool.get([relay], filter, { maxWait: RELAY_TIMEOUT_MS });
-                _setHealth(relay, 'connected');
-                return event;
-            } catch {
-                _setHealth(relay, 'error');
-                return null;
-            }
-        }),
-    );
-    let best: NostrEvent | null = null;
-    for (const r of results) {
-        if (r.status === 'fulfilled' && r.value) {
-            if (!best || r.value.created_at > best.created_at) {
-                best = r.value;
-            }
-        }
-    }
-    return best;
+export interface FanGetResult {
+    event: NostrEvent | null;
+    /** Number of relays (out of `totalRelays`) that agreed on `event`. 0 if `event` is null. */
+    agreeingRelays: number;
+    /** Total relays queried. */
+    totalRelays: number;
+    /**
+     * This call's own final per-relay labels — computed regardless of `trackUiStatus`, so a caller
+     * that needs to act on them (e.g. read-repair) can use data intrinsic to *this* fetch instead of
+     * re-reading the shared `_fetchStatus` store, which a concurrently-running fetch for a different
+     * plan could have already overwritten by the time the caller gets around to reading it.
+     */
+    relayStatuses: Map<string, RelayHealth>;
 }
 
-async function fanQuery(filter: Parameters<SimplePool['querySync']>[1]): Promise<NostrEvent[]> {
+/**
+ * Fetches from all relays in parallel, but stops waiting as soon as a strict majority of `relays`
+ * have delivered the same event and no other relay has delivered one with a higher `created_at`
+ * that would outrank it.
+ *
+ * Each relay gets its own `subscribeMany` call (rather than one call shared across all relays) so
+ * that nostr-tools' internal dedup-by-id (`_knownIds`, scoped per call) stays isolated per relay.
+ * A single relay's own subscription can't shadow another relay's genuine delivery of the same
+ * event id — sharing one call across relays would let a misbehaving relay claim an id first (its
+ * raw "id" field is checked before the event is parsed or verified) and silently suppress the
+ * real delivery from every other relay.
+ *
+ * Reacting to `onevent` directly (rather than the `get()`/`querySync()` convenience wrappers)
+ * matters too: those only resolve a given relay's promise once *that relay* reaches EOSE (or times
+ * out), so a slow-to-EOSE relay would gate consensus-checking even after its event had already
+ * arrived on the wire.
+ */
+async function fanGet(
+    filter: Parameters<AbstractSimplePool['subscribeMany']>[1],
+    relays: string[] = NOSTR_RELAYS,
+    fallbackTimeoutMs: number = RELAY_TIMEOUT_MS + QUERY_GRACE_MS,
+    // Lets a caller end a specific still-pending relay's subscription mid-flight (e.g. once a
+    // concurrently-running lookup learns that relay can't possibly have the answer) without
+    // restarting anything — the relays that already responded keep their answers, and consensus
+    // is rechecked against the shrunken set. Called synchronously with the prune function before
+    // this Promise otherwise settles.
+    registerPruner?: (prune: (relay: string) => void) => void,
+    // False for internal/auxiliary lookups that shouldn't drive the user-visible fetch-status UI
+    // (e.g. the index size-hint lookup fetchPlan runs alongside its real data fetch) — without
+    // this, two fanGet calls running concurrently would stomp on the same shared status/progress
+    // stores, and the auxiliary one finishing first would wrongly freeze the UI as "done".
+    trackUiStatus: boolean = true,
+): Promise<FanGetResult> {
+    // Captured once up front: this call "owns" the shared UI stores only as long as no newer
+    // UI-tracked fanGet call has started since. A stale call whose fetch is still running when a
+    // fresher one begins silently stops writing to `_fetchStatus`/`_fetchProgress` instead of
+    // fighting the newer call for control of what the user is currently looking at.
+    const myGeneration = trackUiStatus ? ++_fetchGeneration : -1;
+    function uiActive(): boolean {
+        return trackUiStatus && myGeneration === _fetchGeneration;
+    }
+
+    return new Promise((resolve) => {
+        const events = new Map<string, NostrEvent>();
+        const relaysById = new Map<string, Set<string>>();
+        const active = new Set(relays);
+        const prunedRelays = new Set<string>();
+        let resolved = false;
+
+        function threshold(): number {
+            return consensusThreshold(relays.length - prunedRelays.size);
+        }
+
+        function bestSoFar(): NostrEvent | null {
+            let best: NostrEvent | null = null;
+            for (const event of events.values()) {
+                if (!best || event.created_at > best.created_at) best = event;
+            }
+            return best;
+        }
+
+        // This call's own view of each relay's label, independent of `trackUiStatus`/`uiActive()` —
+        // callers that need to act on the result (e.g. read-repair) key off this instead of the
+        // shared, mutable `_fetchStatus` store. `best: null` means no event has arrived yet.
+        function relayLabels(best: NostrEvent | null): Map<string, RelayHealth> {
+            const labels = new Map<string, RelayHealth>();
+            if (!best) return labels;
+            for (const [id, supporters] of relaysById) {
+                const label = id === best.id ? 'connected' : 'stale';
+                for (const relay of supporters) labels.set(relay, label);
+            }
+            return labels;
+        }
+
+        // Once the fetch concludes, every relay still 'checking' gets a terminal status: 'skipped'
+        // if we stopped listening because consensus was already reached elsewhere (not a failure),
+        // or 'error' if we simply ran out of patience without ever hearing from it. Pruned relays
+        // already got their own (equally non-failure) 'skipped' status when they were pruned.
+        function settleStragglers(outcome: 'consensus' | 'timeout'): void {
+            if (!uiActive()) return;
+            for (const relay of relays) {
+                if (_fetchStatus.get(relay) === 'checking') {
+                    _setFetchStatus(relay, outcome === 'consensus' ? 'skipped' : 'error');
+                }
+            }
+        }
+
+        // A relay marked 'connected' answered with *some* matching event, but that doesn't mean
+        // it's the (currently) leading one — a relay serving a stale (superseded) version still
+        // delivers a real event and would otherwise look identical to one actually contributing
+        // to the result. Called every time a new event arrives (not just once at the end), so the
+        // live tooltip never shows "4/5 responded" while quietly meaning "only 2 of those 4 agree
+        // with each other" — relays get relabeled the moment a newer competing event outranks
+        // theirs, same rule `bestSoFar()`/the timeout fallback would use if it resolved right now.
+        function updateRelayLabels(): void {
+            if (!uiActive()) return;
+            for (const [relay, label] of relayLabels(bestSoFar())) _setFetchStatus(relay, label);
+        }
+
+        function finish(best: NostrEvent | null, agreeingRelays: number, outcome: 'consensus' | 'timeout'): void {
+            if (resolved) return;
+            resolved = true;
+            clearTimeout(fallbackHandle);
+            settleStragglers(outcome);
+            updateRelayLabels();
+            if (uiActive()) _fetchProgress.finish(outcome === 'consensus' ? 'reached' : 'short', agreeingRelays);
+            resolve({
+                event: best,
+                agreeingRelays,
+                totalRelays: relays.length - prunedRelays.size,
+                relayStatuses: relayLabels(best),
+            });
+            for (const closer of closers.values()) closer.close('fanGet: resolved');
+        }
+
+        function checkConsensus(): void {
+            if (resolved) return;
+            updateRelayLabels();
+            const currentThreshold = threshold();
+            let bestAgreement = 0;
+            for (const [id, event] of events) {
+                const agreeingRelays = relaysById.get(id)?.size ?? 0;
+                bestAgreement = Math.max(bestAgreement, agreeingRelays);
+                if (agreeingRelays < currentThreshold) continue;
+                const challenged = [...events.values()].some(
+                    (other) => other.id !== id && other.created_at > event.created_at,
+                );
+                if (!challenged) {
+                    finish(event, agreeingRelays, 'consensus');
+                    return;
+                }
+            }
+            if (uiActive()) _fetchProgress.update(bestAgreement);
+            // Pruning can shrink `active` to nothing without ever reaching consensus (e.g. every
+            // remaining relay turned out too small) — nothing else will ever call finish() in that
+            // case, so resolve now with whatever's on hand instead of waiting out the full timeout.
+            if (active.size === 0) {
+                finish(bestSoFar(), bestAgreement, 'timeout');
+            }
+        }
+
+        function pruneRelay(relay: string): void {
+            if (resolved || !active.has(relay)) return;
+            active.delete(relay);
+            prunedRelays.add(relay);
+            if (uiActive() && _fetchStatus.get(relay) === 'checking') _setFetchStatus(relay, 'skipped');
+            closers.get(relay)?.close('fanGet: pruned');
+            checkConsensus();
+        }
+
+        registerPruner?.(pruneRelay);
+
+        // No consensus reached — fall back to whatever the best response was once every relay
+        // has had its full connect+query budget (mirrors the previous wait-for-all behavior).
+        const fallbackHandle = setTimeout(() => {
+            const best = bestSoFar();
+            finish(best, best ? (relaysById.get(best.id)?.size ?? 0) : 0, 'timeout');
+        }, fallbackTimeoutMs);
+
+        if (uiActive()) {
+            _resetFetchStatus(relays);
+            _fetchProgress.reset(relays.length, threshold());
+        }
+
+        const closers = new Map(
+            relays.map((relay) => [
+                relay,
+                _pool.subscribeMany([relay], filter, {
+                    maxWait: RELAY_TIMEOUT_MS,
+                    onevent: (event) => {
+                        active.delete(relay);
+                        if (uiActive()) _setFetchStatus(relay, 'connected');
+                        events.set(event.id, event);
+                        let relaySet = relaysById.get(event.id);
+                        if (!relaySet) {
+                            relaySet = new Set();
+                            relaysById.set(event.id, relaySet);
+                        }
+                        relaySet.add(relay);
+                        checkConsensus();
+                    },
+                    onclose: (reasons) => {
+                        // Only a genuine per-relay failure/timeout should read as an error — closing
+                        // relays we simply stopped waiting on (consensus reached, or pruned as too
+                        // small) shouldn't retroactively look like they failed.
+                        if (reasons[0] !== 'fanGet: resolved' && reasons[0] !== 'fanGet: pruned') {
+                            active.delete(relay);
+                            if (uiActive() && _fetchStatus.get(relay) === 'checking') _setFetchStatus(relay, 'error');
+                            checkConsensus();
+                        }
+                    },
+                }),
+            ]),
+        );
+    });
+}
+
+/**
+ * Internal/auxiliary lookup — same fan-out/consensus logic as {@link fanGet}, but for a call that
+ * is never itself the operation the user is watching progress for (a verification round-trip after
+ * publishing, a rename's pre-read, a size-hint lookup alongside a real fetch). Always opts out of
+ * the shared fetch-status/progress UI so it can never be mistaken for — or stomp on — whichever
+ * fetch actually is user-visible right now.
+ */
+function fanGetInternal(
+    filter: Parameters<AbstractSimplePool['subscribeMany']>[1],
+    relays: string[] = NOSTR_RELAYS,
+    fallbackTimeoutMs?: number,
+): Promise<FanGetResult> {
+    return fanGet(filter, relays, fallbackTimeoutMs, undefined, false);
+}
+
+async function fanQuery(filter: Parameters<AbstractSimplePool['querySync']>[1]): Promise<NostrEvent[]> {
     const results = await Promise.allSettled(
         NOSTR_RELAYS.map(async (relay) => {
             try {
@@ -339,17 +806,55 @@ export async function retryRelay(relay: string): Promise<void> {
     if (!_lastPublishedEvents) return;
     _setHealth(relay, 'checking');
     const { index, data } = _lastPublishedEvents;
+
+    const limits = await fetchRelayLimits(relay);
+    if (limits.maxMessageLength !== undefined && wireEventSize(data) > limits.maxMessageLength) {
+        _setHealth(relay, 'skipped');
+        return;
+    }
+
     const dataPromises = _pool.publish([relay], data);
     const indexPromises = _pool.publish([relay], index);
     try {
         await Promise.race([
             Promise.all([dataPromises[0], indexPromises[0]]),
-            new Promise<never>((_, reject) => setTimeout(reject, 10000)),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS),
+            ),
         ]);
         _setHealth(relay, 'connected');
-    } catch {
+    } catch (ex) {
         _setHealth(relay, 'error');
+        learnSizeLimitFromRejection(relay, data, ex instanceof Error ? ex.message : String(ex));
     }
+}
+
+/**
+ * Filters NOSTR_RELAYS down to the ones known able to hold `dataEvent`, marking every excluded
+ * relay 'skipped' for the UI. Throws if every relay is excluded.
+ *
+ * Must run — and its result must be reused, not recomputed — before the index event is built: the
+ * index's `relays` tag records this exact list so a future fetch can prune to it directly instead
+ * of re-deriving eligibility from a possibly-cold or since-changed relay size-limit cache. Computing
+ * it twice risks the index claiming a different set than what was actually published to.
+ */
+function computeEligibleRelays(dataEvent: NostrEvent): string[] {
+    const dataSize = wireEventSize(dataEvent);
+    const eligibleRelays: string[] = [];
+    for (const relay of NOSTR_RELAYS) {
+        const maxLen = peekRelayLimits(relay).maxMessageLength;
+        if (maxLen !== undefined && dataSize > maxLen) {
+            _setHealth(relay, 'skipped');
+        } else {
+            eligibleRelays.push(relay);
+        }
+    }
+    if (eligibleRelays.length === 0) {
+        throw new Error(
+            `This plan is too large for every configured relay (${Math.ceil(dataSize / 1024)}KB). Try removing some content.`,
+        );
+    }
+    return eligibleRelays;
 }
 
 /** Publishes a data+index event pair and verifies the index landed via a relay round-trip. */
@@ -358,34 +863,51 @@ async function publishEventPair(
     planId: string,
     dataEvent: NostrEvent,
     indexEvent: NostrEvent,
+    eligibleRelays: string[],
 ): Promise<void> {
     _lastPublishedEvents = { index: indexEvent, data: dataEvent };
 
+    const threshold = consensusThreshold(eligibleRelays.length);
+    _publishProgress.reset(eligibleRelays.length, threshold);
+
     // Publish both events in parallel — data first so it's available when index arrives
-    const dataPublish = _pool.publish(NOSTR_RELAYS, dataEvent);
-    const indexPublish = _pool.publish(NOSTR_RELAYS, indexEvent);
+    const dataPublish = _pool.publish(eligibleRelays, dataEvent);
+    const indexPublish = _pool.publish(eligibleRelays, indexEvent);
+
+    let confirmed = 0;
 
     const relayResults = await Promise.allSettled(
-        NOSTR_RELAYS.map(async (relay, i) => {
+        eligibleRelays.map(async (relay, i) => {
             try {
                 await Promise.race([
                     Promise.all([dataPublish[i], indexPublish[i]]),
-                    new Promise<never>((_, reject) => setTimeout(reject, 10000)),
+                    new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS),
+                    ),
                 ]);
                 _setHealth(relay, 'connected');
+                _publishProgress.update(++confirmed);
             } catch (ex) {
                 _setHealth(relay, 'error');
+                learnSizeLimitFromRejection(relay, dataEvent, ex instanceof Error ? ex.message : String(ex));
                 throw ex;
             }
         }),
     );
 
     const accepted = relayResults.filter((r) => r.status === 'fulfilled').length;
+    _publishProgress.finish(accepted >= threshold ? 'reached' : 'short', accepted);
     if (accepted === 0) {
         throw new Error('Could not publish — no relays responded. Check your internet connection and try again.');
     }
 
-    const stored = await fanGet({ kinds: [PLAN_KIND], authors: [pk], '#d': [planId] });
+    // eligibleRelays, not the default NOSTR_RELAYS — the relays excluded above never received the
+    // event, so querying the full relay list would need a majority out of a larger denominator than
+    // the one the publish itself was actually judged against, and could wait out a needless timeout.
+    const { event: stored } = await fanGetInternal(
+        { kinds: [PLAN_KIND], authors: [pk], '#d': [planId] },
+        eligibleRelays,
+    );
 
     if (!stored) {
         throw new Error('Verification failed — the plan was not found on any relay after publishing.');
@@ -431,22 +953,29 @@ export async function publishPlan(
     const planId = id ?? randomPlanId();
 
     const planJson = sceneToJson(scene);
+    const { content: storedJson, compressed } = await compressForStorage(planJson);
 
-    // Encrypt content for private plans (NIP-44 self-encryption — only this key can decrypt)
+    // Encrypt content for private plans (NIP-44 self-encryption — only this key can decrypt).
+    // Compress-then-encrypt, never the other way — encrypted bytes are high-entropy and won't
+    // compress at all.
     let dataContent: string;
     if (visibility === 'private') {
         const convKey = nip44.getConversationKey(sk, pk);
-        dataContent = nip44.encrypt(planJson, convKey);
+        dataContent = nip44.encrypt(storedJson, convKey);
     } else {
-        dataContent = planJson;
+        dataContent = storedJson;
     }
 
-    // Data event (kind 30079) — full plan content, self-describing visibility via enc tag
+    // Data event (kind 30079) — full plan content, self-describing visibility via enc tag and
+    // compression via comp tag
     const dataTags: string[][] = [
         ['d', planId],
         ['name', name],
         ['v', String(XIVPLAN_FORMAT_VERSION)],
     ];
+    if (compressed) {
+        dataTags.push(['comp', 'gzip']);
+    }
     if (visibility === 'private') {
         dataTags.push(['enc', 'nip44-self']);
     }
@@ -460,12 +989,21 @@ export async function publishPlan(
         sk,
     );
 
-    // Index event (kind 30078) — metadata + pointer to data event
+    const eligibleRelays = computeEligibleRelays(dataEvent);
+
+    // Index event (kind 30078) — metadata + pointer to data event. Carries the data event's wire
+    // size and the exact relays it's eligible for, so a future fetch can learn both cheaply: the
+    // index is small enough that every relay can hold it regardless of the data event's size, so
+    // this lets fetchPlan prune to exactly the relays known able to hold the (possibly much larger)
+    // data event, instead of waiting out a connection timeout on a relay that was never going to
+    // have it.
     const indexTags: string[][] = [
         ['d', planId],
         ['name', name],
         ['v', String(XIVPLAN_FORMAT_VERSION)],
         ['e', dataEvent.id],
+        ['size', String(wireEventSize(dataEvent))],
+        ['relays', eligibleRelays.join(',')],
     ];
     if (visibility === 'private') {
         indexTags.push(['enc', 'nip44-self']);
@@ -481,7 +1019,7 @@ export async function publishPlan(
         sk,
     );
 
-    await publishEventPair(pk, planId, dataEvent, indexEvent);
+    await publishEventPair(pk, planId, dataEvent, indexEvent, eligibleRelays);
 
     upsertVaultCacheEntry(pk, { id: planId, name, publishedAt: new Date(now * 1000), visibility });
 
@@ -516,13 +1054,14 @@ export async function renamePlan(
     const pk = getPublicKey(sk);
     const now = Math.floor(Date.now() / 1000);
 
-    const existingData = await fanGet({ kinds: [PLAN_DATA_KIND], authors: [pk], '#d': [id] });
+    const { event: existingData } = await fanGetInternal({ kinds: [PLAN_DATA_KIND], authors: [pk], '#d': [id] });
     if (!existingData) {
         throw new Error(`Plan not found on any relay — cannot rename.`);
     }
 
     const version = existingData.tags.find((t) => t[0] === 'v')?.[1] ?? String(XIVPLAN_FORMAT_VERSION);
     const currentVisibility = visibilityFromTags(existingData.tags);
+    const compTag = existingData.tags.find((t) => t[0] === 'comp')?.[1];
 
     let content = existingData.content;
     if (newVisibility !== currentVisibility) {
@@ -530,11 +1069,16 @@ export async function renamePlan(
         content = currentVisibility === 'private' ? nip44.decrypt(content, convKey) : nip44.encrypt(content, convKey);
     }
 
+    // Content is reused byte-for-byte (see doc comment above), so whatever compression it already
+    // carries is preserved as-is — just forward the same comp tag rather than re-deciding it.
     const dataTags: string[][] = [
         ['d', id],
         ['name', newName],
         ['v', version],
     ];
+    if (compTag) {
+        dataTags.push(['comp', compTag]);
+    }
     if (newVisibility === 'private') {
         dataTags.push(['enc', 'nip44-self']);
     }
@@ -548,11 +1092,17 @@ export async function renamePlan(
         sk,
     );
 
+    // Recomputed rather than copied forward: re-encrypting/decrypting on a visibility change
+    // changes the data event's size (and therefore which relays are still eligible), so the old
+    // index's hints would otherwise go stale.
+    const eligibleRelays = computeEligibleRelays(dataEvent);
     const indexTags: string[][] = [
         ['d', id],
         ['name', newName],
         ['v', version],
         ['e', dataEvent.id],
+        ['size', String(wireEventSize(dataEvent))],
+        ['relays', eligibleRelays.join(',')],
     ];
     if (newVisibility === 'private') {
         indexTags.push(['enc', 'nip44-self']);
@@ -567,7 +1117,7 @@ export async function renamePlan(
         sk,
     );
 
-    await publishEventPair(pk, id, dataEvent, indexEvent);
+    await publishEventPair(pk, id, dataEvent, indexEvent, eligibleRelays);
 
     const entry: NostrPlanInfo = { id, name: newName, publishedAt: new Date(now * 1000), visibility: newVisibility };
     upsertVaultCacheEntry(pk, entry);
@@ -580,23 +1130,145 @@ export interface FetchPlanResult {
     scene: Scene;
     visibility: 'public' | 'private';
     name: string;
+    /** Number of relays that agreed on the fetched data, out of totalRelays queried. */
+    agreeingRelays: number;
+    totalRelays: number;
+}
+
+/**
+ * Short, capped lookup for the index event's `size` hint — just enough to learn (or fail to
+ * learn) which relays are already known too small for the data event. Low-trust by design: a
+ * wrong or missing hint only costs efficiency, never correctness, since the data fetch's own
+ * consensus check is still what actually decides the returned content.
+ */
+const INDEX_HINT_TIMEOUT_MS = 3000;
+
+/**
+ * Minimum independently-agreeing relays required before a fetch's winning event gets propagated
+ * to relays that don't have it. Guards against a single relay's claim (wrong, or an outright lie)
+ * being blindly broadcast everywhere via repair — two independent relays agreeing is real
+ * corroboration; one relay's unconfirmed report isn't, even if it's all we have.
+ */
+const REPAIR_MIN_AGREEMENT = 2;
+
+/**
+ * Read repair: fire-and-forget republish of a fetch's winning event to every relay that's
+ * *confirmed* behind — one we actually heard back from with a different (older) event, i.e.
+ * 'stale' — self-healing relays that missed an update, got pruned, or came back online with
+ * outdated data. Deliberately excludes 'skipped'/'error' relays: we have no evidence at all about
+ * what they currently hold (we either never heard from them, or gave up before they answered) —
+ * pushing to them assumes they're behind, but they could just as easily be sitting on a genuinely
+ * newer version we simply failed to fetch in time, and relying on every relay to correctly discard
+ * an incoming write that's older than what it already has isn't a safe assumption to build on.
+ * Never awaited by the caller and never throws; this is opportunistic housekeeping, not something
+ * the user asked for, so a failed repair attempt should be invisible.
+ *
+ * Critical: `event` must be re-sent exactly as received — same `id`, `created_at`, `sig`, content.
+ * Never re-sign or re-timestamp it. A relay only keeps the highest `created_at` per author+kind+
+ * d-tag (NIP-33), so "repairing" with a freshened timestamp on a merely *reconstructed* copy could
+ * make a stale version outrank a genuinely newer one we simply haven't seen yet, permanently
+ * burying it on that relay the next time it actually shows up.
+ *
+ * `relayStatuses` must be the calling fanGet call's own {@link FanGetResult.relayStatuses} — never
+ * the shared `getFetchStatus()` store, which a different, concurrently-running fetch could have
+ * already overwritten with an unrelated plan's relay labels by the time this runs.
+ */
+function repairStaleRelays(event: NostrEvent, agreeingRelays: number, relayStatuses: Map<string, RelayHealth>): void {
+    if (agreeingRelays < REPAIR_MIN_AGREEMENT) return;
+    const eventSize = wireEventSize(event);
+    const targets = [...relayStatuses]
+        .filter(([url, status]) => {
+            if (status !== 'stale') return false;
+            // A relay we've already confirmed can't hold an event this size (either via NIP-11 or
+            // a prior rejection learned in learnSizeLimitFromRejection) will never accept this
+            // repair either — skip it rather than repeating a doomed publish on every fetch.
+            const maxLen = peekRelayLimits(url).maxMessageLength;
+            return maxLen === undefined || eventSize <= maxLen;
+        })
+        .map(([url]) => url);
+    if (targets.length === 0) return;
+    const results = _pool.publish(targets, event);
+    targets.forEach((relay, i) => {
+        void results[i]?.catch((err) => {
+            learnSizeLimitFromRejection(relay, event, err instanceof Error ? err.message : String(err));
+            // Best-effort — a relay that can't accept the repair right now might succeed on
+            // some future fetch instead. Nothing here should ever surface to the user.
+        });
+    });
 }
 
 export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanResult> {
-    // Fetch data event directly by d-tag — kind 30079 is a NIP-33 parameterized replaceable event,
-    // so the relay always returns the latest version. No index round-trip needed for new plans.
-    const dataEvent = await fanGet({ kinds: [PLAN_DATA_KIND], authors: [pubkey], '#d': [id] });
+    // The index event is small enough that every relay can hold it regardless of the data event's
+    // size, so its `size` hint tells us in advance which relays are guaranteed not to have the
+    // (possibly much larger) data event. This runs concurrently with the data fetch below, rather
+    // than before it — awaiting it first would mean any relay that already answered the data
+    // fetch while we were still waiting on the (small, usually fast, but not guaranteed-fast)
+    // index lookup gets asked all over again. Instead, both start at once, and the moment the
+    // hint identifies a data relay as hopeless, that specific *still-pending* subscription is
+    // ended immediately — no restart, and relays that already responded keep their answers.
+    let pruneDataRelay: ((relay: string) => void) | undefined;
+
+    const dataPromise = fanGet(
+        { kinds: [PLAN_DATA_KIND], authors: [pubkey], '#d': [id] },
+        NOSTR_RELAYS,
+        undefined,
+        (prune) => {
+            pruneDataRelay = prune;
+        },
+    );
+
+    // Internal hint lookup — not itself something the user's fetch-progress UI should reflect (see
+    // fanGetInternal's own note on why an auxiliary lookup can't drive the shared status/progress
+    // stores).
+    void fanGetInternal(
+        { kinds: [PLAN_KIND], authors: [pubkey], '#d': [id] },
+        NOSTR_RELAYS,
+        INDEX_HINT_TIMEOUT_MS,
+    ).then(({ event: indexEvent }) => {
+        if (!indexEvent) return;
+        const relaysTag = indexEvent.tags.find((t) => t[0] === 'relays')?.[1];
+        if (relaysTag !== undefined) {
+            // Authoritative: exactly the relays the publisher confirmed could hold this data at
+            // publish time. Prune everything else outright, instead of guessing from a
+            // possibly-cold or since-changed relay size-limit cache — this is what lets the
+            // consensus threshold shrink to match relays that can actually ever hold this plan,
+            // rather than being measured against every configured relay regardless of whether
+            // some of them were permanently excluded from ever receiving it.
+            const eligible = new Set(relaysTag.split(','));
+            for (const relay of NOSTR_RELAYS) {
+                if (!eligible.has(relay)) pruneDataRelay?.(relay);
+            }
+            return;
+        }
+        // Fallback for plans published before the `relays` tag existed: infer eligibility from
+        // the size hint and whatever relay limits have been learned so far this session.
+        const knownSize = Number(indexEvent.tags.find((t) => t[0] === 'size')?.[1]);
+        if (!Number.isFinite(knownSize)) return;
+        for (const relay of NOSTR_RELAYS) {
+            const maxLen = peekRelayLimits(relay).maxMessageLength;
+            if (maxLen !== undefined && knownSize > maxLen) pruneDataRelay?.(relay);
+        }
+    });
+
+    const { event: dataEvent, agreeingRelays, totalRelays, relayStatuses } = await dataPromise;
     if (!dataEvent) throw new Error(`Plan not found on any relay.`);
+
+    repairStaleRelays(dataEvent, agreeingRelays, relayStatuses);
 
     const name = dataEvent.tags.find((t) => t[0] === 'name')?.[1] ?? id;
 
     // Visibility from enc tag on data event (new format, added alongside the enc tag on the index).
     // Older plans lack enc on data — for those, NIP-44 ciphertext is not valid JSON, so sniff the
-    // content to detect private plans without an extra index round-trip.
+    // content to detect private plans without an extra index round-trip. A comp tag with no enc
+    // tag is decisive on its own (compressed bytes don't parse as JSON either, so the old sniff
+    // would misread them as private) — no plan published with compression predates the comp tag.
     const encTag = dataEvent.tags.find((t) => t[0] === 'enc')?.[1];
+    const compTag = dataEvent.tags.find((t) => t[0] === 'comp')?.[1];
     let visibility: 'public' | 'private';
     if (encTag !== undefined) {
         visibility = encTag === 'nip44-self' ? 'private' : 'public';
+    } else if (compTag !== undefined) {
+        visibility = 'public';
     } else {
         let looksLikeJson = false;
         try {
@@ -625,7 +1297,15 @@ export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanRe
         }
     }
 
-    return { scene: jsonToScene(content), visibility, name };
+    if (compTag === 'gzip') {
+        try {
+            content = await gzipDecompress(base64UrlToBytes(content));
+        } catch {
+            throw new Error('Failed to decompress the plan — the stored data may be corrupted.');
+        }
+    }
+
+    return { scene: jsonToScene(content), visibility, name, agreeingRelays, totalRelays };
 }
 
 // ── Delete (NIP-09) ───────────────────────────────────────────────────────────
@@ -837,6 +1517,8 @@ let _cachedPromise: Promise<Scene | undefined> | undefined;
 let _cachedVisibility: 'public' | 'private' | undefined;
 let _cachedName: string | undefined;
 let _cachedError: unknown;
+let _cachedAgreeingRelays: number | undefined;
+let _cachedTotalRelays: number | undefined;
 
 export function getNostrFetchPromise(pubkey: string, id: string): Promise<Scene | undefined> {
     const key = `${pubkey}|${id}`;
@@ -846,10 +1528,14 @@ export function getNostrFetchPromise(pubkey: string, id: string): Promise<Scene 
     _cachedError = undefined;
     _cachedVisibility = undefined;
     _cachedName = undefined;
+    _cachedAgreeingRelays = undefined;
+    _cachedTotalRelays = undefined;
     _cachedPromise = fetchPlan(pubkey, id)
         .then((result) => {
             _cachedVisibility = result.visibility;
             _cachedName = result.name;
+            _cachedAgreeingRelays = result.agreeingRelays;
+            _cachedTotalRelays = result.totalRelays;
             return result.scene;
         })
         .catch((ex) => {
@@ -871,4 +1557,20 @@ export function getNostrFetchedVisibility(): 'public' | 'private' | undefined {
 
 export function getNostrFetchedName(): string | undefined {
     return _cachedName;
+}
+
+/**
+ * Consensus info for the last completed URL fetch, if any — used to warn when it fell short of
+ * {@link consensusThreshold}. Consuming (clears the cache after reading): this is meant to be
+ * read exactly once, to show exactly one warning per fetch. A plain non-consuming getter would
+ * fire twice under React StrictMode's intentional double-invoke of effects in development —
+ * harmless in production (where that double-invoke doesn't happen) but confusing in dev, since
+ * the second read would otherwise still find the same cached result and warn again.
+ */
+export function consumeNostrFetchedConsensus(): { agreeingRelays: number; totalRelays: number } | undefined {
+    if (_cachedAgreeingRelays === undefined || _cachedTotalRelays === undefined) return undefined;
+    const result = { agreeingRelays: _cachedAgreeingRelays, totalRelays: _cachedTotalRelays };
+    _cachedAgreeingRelays = undefined;
+    _cachedTotalRelays = undefined;
+    return result;
 }
