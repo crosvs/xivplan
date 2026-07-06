@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { getRelayStatus, probeRelays, subscribeRelayStatus } from './nostr';
 
-export type RelayConnectionStatus = 'checking' | 'connected' | 'error';
+export type RelayConnectionStatus = 'checking' | 'connected' | 'skipped' | 'stale' | 'error';
 
 export interface RelayInfo {
     url: string;
@@ -19,7 +19,9 @@ export interface RelayStatusResult {
 export function aggregateRelayStatus(result: RelayStatusResult): 'checking' | 'connected' | 'partial' | 'offline' {
     if (!result.allChecked) return 'checking';
     if (!result.anyConnected) return 'offline';
-    return result.relays.some((r) => r.status === 'error') ? 'partial' : 'connected';
+    // A relay that answered but with a stale (non-winning) version is evidence of disagreement,
+    // same as an outright error — it just failed in a quieter way.
+    return result.relays.some((r) => r.status === 'error' || r.status === 'stale') ? 'partial' : 'connected';
 }
 
 /**
@@ -28,12 +30,10 @@ export function aggregateRelayStatus(result: RelayStatusResult): 'checking' | 'c
  * Multiple instances share the same underlying state — no duplicate probing.
  */
 export function useRelayStatus(): RelayStatusResult {
-    const [relays, setRelays] = useState<RelayInfo[]>(() => getRelayStatus());
+    const relays = useSyncExternalStore(subscribeRelayStatus, getRelayStatus);
 
     useEffect(() => {
-        const unsub = subscribeRelayStatus(() => setRelays(getRelayStatus()));
         probeRelays(); // fire-and-forget; deduped in nostr.ts
-        return unsub;
     }, []);
 
     const allChecked = relays.every((r) => r.status !== 'checking');

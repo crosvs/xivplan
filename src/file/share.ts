@@ -17,7 +17,7 @@ export function getShareLink(scene: Scene): string {
 }
 
 const PLAN_PREFIX = '#/plan/';
-const NOSTR_PREFIX = '#/nostr/';
+export const NOSTR_PREFIX = '#/nostr/';
 
 function getPlanData(hash: string, searchParams?: URLSearchParams): string | undefined {
     // Current share links are formatted as /#/plan/<data>
