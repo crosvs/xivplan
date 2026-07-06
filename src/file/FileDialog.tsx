@@ -129,7 +129,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = (props) => {
                             <SaveLocalStorage actions={portalNode} />
                         </TabActivity>
                         <TabActivity value="nostr" activeTab={tab}>
-                            <SaveNostr actions={portalNode} />
+                            <SaveNostr actions={portalNode} open={!!props.open} />
                         </TabActivity>
                         <TabActivity value="fileUnsupported" activeTab={tab}>
                             <FileSystemNotSupportedMessage actions={portalNode} download />

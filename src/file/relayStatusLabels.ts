@@ -7,6 +7,7 @@ export const CONNECTIVITY_STATUS_LABELS: Record<RelayHealth, string> = {
     checking: 'checking…',
     skipped: 'not needed',
     stale: 'outdated version',
+    incomplete: 'incomplete data',
 };
 
 /** Wording for {@link CircularRelayIndicator}'s tooltip and{@link RelayFetchList}'s rows during a fetch. */
@@ -16,6 +17,7 @@ export const FETCH_STATUS_LABELS: Record<RelayHealth, string> = {
     checking: 'waiting…',
     skipped: 'not needed',
     stale: 'outdated version',
+    incomplete: 'incomplete data',
 };
 
 /** Wording for {@link CircularRelayIndicator}'s tooltip and{@link RelayPublishList}'s rows during a publish. */
@@ -25,4 +27,5 @@ export const PUBLISH_STATUS_LABELS: Record<RelayHealth, string> = {
     checking: 'pending…',
     skipped: 'too large',
     stale: 'outdated version',
+    incomplete: 'incomplete data',
 };

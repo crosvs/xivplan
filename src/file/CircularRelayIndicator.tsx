@@ -57,6 +57,8 @@ const DOT_COLORS: Record<RelayHealth, string> = {
     checking: tokens.colorPaletteYellowBackground3,
     skipped: tokens.colorNeutralForeground3,
     stale: tokens.colorPaletteMarigoldBackground3,
+    // Same severity tier as 'stale' — has the right version, just not all of it yet.
+    incomplete: tokens.colorPaletteMarigoldBackground3,
 };
 
 function aggregateColor(agg: ReturnType<typeof aggregateRelayStatus>): string {

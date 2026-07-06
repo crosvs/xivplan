@@ -68,7 +68,7 @@ export const ShareDialogButton: React.FC<ShareDialogButtonProps> = ({ children, 
                 </CollapsableToolbarButton>
             </DialogTrigger>
             <DialogSurface>
-                <ShareDialogBody onVideoExportingChange={setVideoExporting} />
+                <ShareDialogBody open={open} onVideoExportingChange={setVideoExporting} />
             </DialogSurface>
         </Dialog>
     );
@@ -77,10 +77,11 @@ export const ShareDialogButton: React.FC<ShareDialogButtonProps> = ({ children, 
 type ShareTab = 'link' | 'nostr' | 'screenshot' | 'video';
 
 interface ShareDialogBodyProps {
+    open: boolean;
     onVideoExportingChange: (exporting: boolean) => void;
 }
 
-const ShareDialogBody: React.FC<ShareDialogBodyProps> = ({ onVideoExportingChange }) => {
+const ShareDialogBody: React.FC<ShareDialogBodyProps> = ({ open, onVideoExportingChange }) => {
     const classes = useStyles();
     const { canonicalScene, source } = useScene();
     const isNostr = source?.type === 'nostr';
@@ -106,7 +107,7 @@ const ShareDialogBody: React.FC<ShareDialogBodyProps> = ({ onVideoExportingChang
                     <ShareLinkTab scene={canonicalScene} actions={portalNode} />
                 </TabActivity>
                 <TabActivity value="nostr" activeTab={tab}>
-                    <NostrTab scene={canonicalScene} source={source} actions={portalNode} />
+                    <NostrTab scene={canonicalScene} source={source} actions={portalNode} open={open} />
                 </TabActivity>
                 <TabActivity value="screenshot" activeTab={tab}>
                     <ScreenshotTab actions={portalNode} />
@@ -169,9 +170,14 @@ interface NostrTabProps {
     scene: Scene;
     source?: FileSource;
     actions: HtmlPortalNode;
+    /** True while the enclosing dialog is open. This tab's component instance persists across the
+     *  dialog's own open/close cycles (Fluent's Dialog doesn't unmount its content), so without this
+     *  a "Published to Nostr" screen from a previous publish — including its live relay Retry
+     *  buttons — would still be showing the next time the dialog opens, even for a different plan. */
+    open: boolean;
 }
 
-const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
+const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions, open }) => {
     const classes = useStyles();
     const isNostr = source?.type === 'nostr';
     const isDirty = useIsDirty();
@@ -186,6 +192,15 @@ const NostrTab: React.FC<NostrTabProps> = ({ scene, source, actions }) => {
     const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
     const [selectedPlan, setSelectedPlan] = useState<NostrPlanInfo | undefined>(undefined);
     const [publishedUrl, setPublishedUrl] = useState('');
+
+    // Every fresh open starts back at the plan picker, never a previous open's "Published" screen —
+    // see the `open` prop's doc comment. Adjusted directly during render (same pattern as
+    // `hasPreselected` below) rather than in an effect, to avoid an extra render.
+    const [wasOpen, setWasOpen] = useState(open);
+    if (open !== wasOpen) {
+        setWasOpen(open);
+        if (open) setPublishedUrl('');
+    }
 
     // getNostrPubkey() resolves asynchronously (reads the key from IDB), so we don't yet know
     // whether the open plan is the user's own on first render — pre-select it once the pubkey

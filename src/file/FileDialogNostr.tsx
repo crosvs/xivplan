@@ -222,9 +222,14 @@ function getInitialVisibility(source: ReturnType<typeof useScene>['source']): 'p
 
 export interface SaveNostrProps {
     actions: HtmlPortalNode;
+    /** True while the enclosing dialog is open. This tab's component instance persists across the
+     *  dialog's own open/close cycles (Fluent's Dialog doesn't unmount its content), so without this
+     *  a "Published to Nostr" screen from a previous save — including its live relay Retry buttons —
+     *  would still be showing the next time the dialog opens, even for a different plan. */
+    open: boolean;
 }
 
-export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
+export const SaveNostr: React.FC<SaveNostrProps> = ({ actions, open }) => {
     const classes = useStyles();
     const isDirty = useIsDirty();
     const setSavedState = useSetSavedState();
@@ -243,6 +248,15 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions }) => {
     const publishProgress = usePublishProgress();
     const { dispatchToast } = useToastController();
     const [publishedUrl, setPublishedUrl] = useState('');
+
+    // Every fresh open starts back at the plan picker, never a previous open's "Published" screen —
+    // see the `open` prop's doc comment. Adjusted directly during render (React's sanctioned pattern
+    // for state derived from a changing prop) rather than in an effect, to avoid an extra render.
+    const [wasOpen, setWasOpen] = useState(open);
+    if (open !== wasOpen) {
+        setWasOpen(open);
+        if (open) setPublishedUrl('');
+    }
 
     // The name field doubles as an inline rename for the selected existing plan (see
     // NostrVaultList's renameSelectedInline) — whatever's typed here is what gets published.

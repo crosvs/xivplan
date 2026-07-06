@@ -36,6 +36,7 @@ const STATUS_COLORS: Record<RelayHealth, string> = {
     checking: tokens.colorPaletteYellowBackground3,
     skipped: tokens.colorNeutralForeground3,
     stale: tokens.colorPaletteMarigoldBackground3,
+    incomplete: tokens.colorPaletteMarigoldBackground3,
 };
 
 export interface RelayStatusRowProps {
