@@ -51,7 +51,7 @@ export const XIVPLAN_FORMAT_VERSION = 1;
  * `_pool` below) — every other relay-facing timeout in this file derives from this one constant so
  * they can't drift out of sync with each other the way the hardcoded values here once did.
  */
-const RELAY_TIMEOUT_MS = 5000;
+const RELAY_TIMEOUT_MS = 12000;
 
 /**
  * Extra time {@link fanGet} (for reads) and the publish race (for writes) wait beyond
