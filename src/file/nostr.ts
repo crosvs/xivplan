@@ -81,7 +81,7 @@ const _pool = new AbstractSimplePool({
 
 // ── Shared relay status ───────────────────────────────────────────────────────
 
-export type RelayHealth = 'checking' | 'connected' | 'skipped' | 'stale' | 'error';
+export type RelayHealth = 'checking' | 'connected' | 'skipped' | 'stale' | 'incomplete' | 'error';
 
 const _health = new Map<string, RelayHealth>(NOSTR_RELAYS.map((url) => [url, 'checking']));
 const _listeners = new Set<() => void>();
@@ -284,6 +284,147 @@ function learnSizeLimitFromRejection(relay: string, event: NostrEvent, reason: s
     }
 }
 
+// ── Data-event chunking ─────────────────────────────────────────────────────────
+// A relay that rejects a plan's data event for being too large will often still accept the exact
+// same bytes split across several smaller NIP-33 events ("chunks") — this is purely a per-relay,
+// reactive fallback (try the whole event first; only chunk for a relay that actually rejects it),
+// never a deliberate data-distribution strategy. Chunk 1 of N reuses the plan's ordinary `d`-tag
+// (planId) — the same slot the unchunked event always used; chunks 2..N use `${planId}:${i}`. These
+// d-tags are *reused* across publish generations (ordinary NIP-33 overwrite-latest-created_at
+// semantics), not versioned — this is safe because every consumer of a non-primary chunk must
+// reject it unless its `created_at` exactly matches the already-established winning primary
+// event's `created_at`. A relay caught mid-publish (some chunks updated, some still old) then just
+// looks like "doesn't have a valid matching chunk yet," never a silent old+new splice, and shrinking
+// chunk counts is safe for free since old high-index chunks are simply never queried once the
+// current version's primary slot declares a smaller N.
+
+/** Hard cap on the publish retry ladder (2 → 4 → 8 → 16 chunks). Beyond this, a relay is treated as
+ *  permanently unable to hold this plan, the same terminal state as today's pre-chunking exclusion. */
+const MAX_CHUNKS = 16;
+
+/**
+ * Splits a string into `n` roughly-equal pieces by character index. Each piece is independently
+ * signed and UTF-8-encoded for the wire, so a boundary landing between the two UTF-16 code units of
+ * a surrogate pair (any character outside the Basic Multilingual Plane — most emoji, some CJK) would
+ * leave each half holding an unpaired surrogate; standard UTF-8 encoders replace those with U+FFFD
+ * independently on each side, before the pieces are ever rejoined — silent, unrecoverable data loss
+ * that {@link joinChunks} could never undo. Nudging the boundary back by one code unit when it would
+ * split a pair avoids this; pieces are only ever concatenated back in order, never parsed
+ * individually, so an unevenly-sized piece here has no other effect.
+ */
+function splitIntoChunks(content: string, n: number): string[] {
+    const size = Math.ceil(content.length / n);
+    const pieces: string[] = [];
+    let start = 0;
+    for (let i = 0; i < n; i++) {
+        let end = i === n - 1 ? content.length : Math.min(content.length, start + size);
+        const endsMidSurrogatePair =
+            end > start + 1 &&
+            end < content.length &&
+            content.charCodeAt(end - 1) >= 0xd800 &&
+            content.charCodeAt(end - 1) <= 0xdbff &&
+            content.charCodeAt(end) >= 0xdc00 &&
+            content.charCodeAt(end) <= 0xdfff;
+        if (endsMidSurrogatePair) end -= 1;
+        pieces.push(content.slice(start, end));
+        start = end;
+    }
+    return pieces;
+}
+
+/** Inverse of {@link splitIntoChunks} — trivial concatenation in order. */
+function joinChunks(pieces: string[]): string {
+    return pieces.join('');
+}
+
+/** Reads a data event's declared chunk count. A missing `chunk` tag (all data published before this
+ *  feature existed) implies '1/1' — the ordinary unchunked case. */
+function chunkCountOf(event: NostrEvent): number {
+    const tag = event.tags.find((t) => t[0] === 'chunk')?.[1];
+    const n = tag ? Number(tag.split('/')[1]) : 1;
+    return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
+/**
+ * A short random per-publish tag, carried on every chunk of one publish (including the whole-event
+ * case) as `['gen', ...]`. `created_at` alone has only 1-second resolution, so two publishes that
+ * land within the same second (a rapid rename right after a save, or just an automated test with no
+ * artificial delay) would otherwise be indistinguishable as "versions" once fetches group relay
+ * responses by created_at rather than event id — this tag is what keeps those genuinely different
+ * publishes from being merged into one group. A missing `gen` tag (any data published before this
+ * existed) has no such protection from `genOf` alone — callers doing version-grouping must fall back
+ * to the event's own id in that case (see the groupKey in `fetchPlanData`), which exactly restores
+ * the old id-based separation for legacy data instead of merging same-second legacy events together.
+ */
+function randomNonce(): string {
+    return bytesToHex(crypto.getRandomValues(new Uint8Array(8)));
+}
+
+/** Reads a data event's `gen` tag (see {@link randomNonce}) — `''` if absent (legacy, pre-chunking
+ *  data, or the index event, which never carries one). Callers that need a collision-safe version
+ *  key must not use this value alone when it's empty — see the doc comment above. */
+function genOf(event: NostrEvent): string {
+    return event.tags.find((t) => t[0] === 'gen')?.[1] ?? '';
+}
+
+/** Smallest power of 2 that is `>= n`. */
+function nextPow2(n: number): number {
+    let p = 1;
+    while (p < n) p *= 2;
+    return p;
+}
+
+/**
+ * Starting chunk count for a relay's *first* chunked attempt (never for the always-first whole-event
+ * try). Uses this relay's cached size limit, if any, to jump straight to a plausible N instead of
+ * always restarting the ladder at 2 — the same cache `learnSizeLimitFromRejection` populates, just
+ * repurposed from "exclude this relay" to "guess a good starting chunk count."
+ */
+function startingChunkCount(dataSize: number, cachedLimit: number | undefined): number {
+    if (cachedLimit === undefined) return 2;
+    return Math.min(MAX_CHUNKS, Math.max(2, nextPow2(Math.ceil(dataSize / cachedLimit))));
+}
+
+/**
+ * Builds `n` signed PLAN_DATA_KIND events for one relay's attempt — `n=1` is just the ordinary
+ * whole-event case. `sharedTags` (name/v/comp?/enc?) live only on chunk 1; chunks 2..N carry only
+ * `d`/`chunk`/`gen`, since nothing ever reads metadata off a non-primary chunk and duplicating it
+ * would waste exactly the bytes this feature exists to save. Every piece carries the same `gen`
+ * (see {@link randomNonce}) — that's what lets a fetch recognize them as the same publish.
+ */
+function buildChunkSet(
+    sk: Uint8Array,
+    planId: string,
+    createdAt: number,
+    gen: string,
+    sharedTags: string[][],
+    content: string,
+    n: number,
+): NostrEvent[] {
+    const pieces = n === 1 ? [content] : splitIntoChunks(content, n);
+    return pieces.map((piece, index) => {
+        const i = index + 1;
+        const tags: string[][] = i === 1 ? [['d', planId], ...sharedTags] : [['d', `${planId}:${i}`]];
+        tags.push(['chunk', `${i}/${n}`], ['gen', gen]);
+        return finalizeEvent({ kind: PLAN_DATA_KIND, created_at: createdAt, tags, content: piece }, sk);
+    });
+}
+
+/** The whole (unchunked) attempt is always exactly one event — a thin wrapper around
+ *  {@link buildChunkSet} so callers don't need a non-null assertion on the always-length-1 result. */
+function buildWholeEvent(
+    sk: Uint8Array,
+    planId: string,
+    createdAt: number,
+    gen: string,
+    sharedTags: string[][],
+    content: string,
+): NostrEvent {
+    const [wholeEvent] = buildChunkSet(sk, planId, createdAt, gen, sharedTags, content, 1);
+    if (!wholeEvent) throw new Error('unreachable: buildChunkSet(n=1) always returns exactly one event');
+    return wholeEvent;
+}
+
 let _probing = false;
 let _lastProbeTime = 0;
 const PROBE_COOLDOWN_MS = 5 * 60 * 1000;
@@ -432,6 +573,10 @@ export async function generateNewKey(): Promise<void> {
     const sk = generateSecretKey();
     await nostrStore.setItem('sk', bytesToHex(sk));
     await refreshNostrPubkey();
+    // A retry against stashed publish state signed under the old key would republish a data event
+    // under the new key while the already-published index event stays signed by the old one —
+    // ending any in-flight publish session's retry option is this function's job, not retryRelay's.
+    _lastPublishedPlan = null;
 }
 
 /** Accepts a 64-char hex private key (contents of the exported .txt file). */
@@ -442,6 +587,7 @@ export async function importSecretKey(text: string): Promise<void> {
     }
     await nostrStore.setItem('sk', hex);
     await refreshNostrPubkey();
+    _lastPublishedPlan = null;
 }
 
 /** Returns a Blob containing the hex private key, suitable for saving as .txt. */
@@ -538,6 +684,22 @@ export interface FanGetResult {
      * plan could have already overwritten by the time the caller gets around to reading it.
      */
     relayStatuses: Map<string, RelayHealth>;
+    /**
+     * Each agreeing relay's *own* event from the winning group (not necessarily the same object as
+     * `event`, though for the default id-based grouping it's always byte-identical to it). Needed
+     * when `groupKey` groups by something looser than id — e.g. plan-data chunking, where relays
+     * agreeing on the same version can each hold a physically different "chunk 1" event.
+     */
+    relayEvents: Map<string, NostrEvent>;
+    /**
+     * The UI-ownership generation this call captured (see `_fetchGeneration`), or -1 if
+     * `trackUiStatus` was false. A caller that needs to correct a relay's status in the shared
+     * `_fetchStatus` store *after* this call has already resolved (e.g. `fetchPlanData` downgrading
+     * a relay to `'incomplete'` post-reconstruction) must compare this against the current
+     * `_fetchGeneration` first — otherwise a stale, superseded fetch could stomp on whatever newer
+     * fetch's status is now actually being displayed.
+     */
+    uiGeneration: number;
 }
 
 /**
@@ -572,6 +734,12 @@ async function fanGet(
     // this, two fanGet calls running concurrently would stomp on the same shared status/progress
     // stores, and the auxiliary one finishing first would wrongly freeze the UI as "done".
     trackUiStatus: boolean = true,
+    // Identifies which events count as "the same thing" for consensus purposes. Defaults to id —
+    // correct whenever every relay holding "the same version" holds byte-identical content. Plan
+    // data's chunked fetch overrides this to group by created_at instead, since relays can legitimately
+    // hold the same version as physically different chunk-1 events (different chunk count -> different
+    // bytes -> different id) — see the "Data-event chunking" section above.
+    groupKey: (event: NostrEvent) => string = (e) => e.id,
 ): Promise<FanGetResult> {
     // Captured once up front: this call "owns" the shared UI stores only as long as no newer
     // UI-tracked fanGet call has started since. A stale call whose fetch is still running when a
@@ -583,8 +751,13 @@ async function fanGet(
     }
 
     return new Promise((resolve) => {
+        // Keyed by groupKey(event) — for the default id-based grouping this behaves exactly like the
+        // old id-keyed maps. `events` holds one representative per group (its created_at is all that
+        // ever gets compared); `relaysByKey` holds each individual relay's own event within a group,
+        // since under a looser groupKey (e.g. created_at) two relays agreeing on "the same version"
+        // can still be holding physically different event objects.
         const events = new Map<string, NostrEvent>();
-        const relaysById = new Map<string, Set<string>>();
+        const relaysByKey = new Map<string, Map<string, NostrEvent>>();
         const active = new Set(relays);
         const prunedRelays = new Set<string>();
         let resolved = false;
@@ -607,9 +780,10 @@ async function fanGet(
         function relayLabels(best: NostrEvent | null): Map<string, RelayHealth> {
             const labels = new Map<string, RelayHealth>();
             if (!best) return labels;
-            for (const [id, supporters] of relaysById) {
-                const label = id === best.id ? 'connected' : 'stale';
-                for (const relay of supporters) labels.set(relay, label);
+            const bestKey = groupKey(best);
+            for (const [key, supporters] of relaysByKey) {
+                const label = key === bestKey ? 'connected' : 'stale';
+                for (const relay of supporters.keys()) labels.set(relay, label);
             }
             return labels;
         }
@@ -651,6 +825,8 @@ async function fanGet(
                 agreeingRelays,
                 totalRelays: relays.length - prunedRelays.size,
                 relayStatuses: relayLabels(best),
+                relayEvents: best ? (relaysByKey.get(groupKey(best)) ?? new Map()) : new Map(),
+                uiGeneration: myGeneration,
             });
             for (const closer of closers.values()) closer.close('fanGet: resolved');
         }
@@ -660,12 +836,12 @@ async function fanGet(
             updateRelayLabels();
             const currentThreshold = threshold();
             let bestAgreement = 0;
-            for (const [id, event] of events) {
-                const agreeingRelays = relaysById.get(id)?.size ?? 0;
+            for (const [key, event] of events) {
+                const agreeingRelays = relaysByKey.get(key)?.size ?? 0;
                 bestAgreement = Math.max(bestAgreement, agreeingRelays);
                 if (agreeingRelays < currentThreshold) continue;
                 const challenged = [...events.values()].some(
-                    (other) => other.id !== id && other.created_at > event.created_at,
+                    (other) => groupKey(other) !== key && other.created_at > event.created_at,
                 );
                 if (!challenged) {
                     finish(event, agreeingRelays, 'consensus');
@@ -696,7 +872,7 @@ async function fanGet(
         // has had its full connect+query budget (mirrors the previous wait-for-all behavior).
         const fallbackHandle = setTimeout(() => {
             const best = bestSoFar();
-            finish(best, best ? (relaysById.get(best.id)?.size ?? 0) : 0, 'timeout');
+            finish(best, best ? (relaysByKey.get(groupKey(best))?.size ?? 0) : 0, 'timeout');
         }, fallbackTimeoutMs);
 
         if (uiActive()) {
@@ -712,13 +888,14 @@ async function fanGet(
                     onevent: (event) => {
                         active.delete(relay);
                         if (uiActive()) _setFetchStatus(relay, 'connected');
-                        events.set(event.id, event);
-                        let relaySet = relaysById.get(event.id);
-                        if (!relaySet) {
-                            relaySet = new Set();
-                            relaysById.set(event.id, relaySet);
+                        const key = groupKey(event);
+                        events.set(key, event);
+                        let relayMap = relaysByKey.get(key);
+                        if (!relayMap) {
+                            relayMap = new Map();
+                            relaysByKey.set(key, relayMap);
                         }
-                        relaySet.add(relay);
+                        relayMap.set(relay, event);
                         checkConsensus();
                     },
                     onclose: (reasons) => {
@@ -799,116 +976,139 @@ async function fanQuery(filter: Parameters<AbstractSimplePool['querySync']>[1]):
 
 // ── Publish ───────────────────────────────────────────────────────────────────
 
-let _lastPublishedEvents: { index: NostrEvent; data: NostrEvent } | null = null;
+let _lastPublishedPlan: {
+    planId: string;
+    createdAt: number;
+    gen: string;
+    sharedTags: string[][];
+    content: string;
+    indexEvent: NostrEvent;
+} | null = null;
 
-/** Retry publishing the last pair of signed events to a specific relay. */
-export async function retryRelay(relay: string): Promise<void> {
-    if (!_lastPublishedEvents) return;
-    _setHealth(relay, 'checking');
-    const { index, data } = _lastPublishedEvents;
-
-    const limits = await fetchRelayLimits(relay);
-    if (limits.maxMessageLength !== undefined && wireEventSize(data) > limits.maxMessageLength) {
-        _setHealth(relay, 'skipped');
-        return;
-    }
-
-    const dataPromises = _pool.publish([relay], data);
-    const indexPromises = _pool.publish([relay], index);
-    try {
-        await Promise.race([
-            Promise.all([dataPromises[0], indexPromises[0]]),
-            new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS),
-            ),
-        ]);
-        _setHealth(relay, 'connected');
-    } catch (ex) {
-        _setHealth(relay, 'error');
-        learnSizeLimitFromRejection(relay, data, ex instanceof Error ? ex.message : String(ex));
-    }
+/**
+ * Publishes every event in a set to one relay in parallel — `events.length > 1` means this is a
+ * chunked attempt (already-split pieces), `=== 1` the ordinary whole-event attempt, each using the
+ * matching outer race timeout (see {@link QUERY_GRACE_MS}'s doc comment: later ladder rungs publish
+ * much smaller pieces, so a size rejection or OK should come back fast — no need for the full
+ * whole-event budget on every rung of a relay that needs the full ladder). Feeds every rejection
+ * through `learnSizeLimitFromRejection` so the cache keeps improving even from a partial-set failure.
+ */
+async function tryPublishSet(relay: string, events: NostrEvent[]): Promise<{ ok: boolean; sizeRejected: boolean }> {
+    const timeoutMs = events.length > 1 ? RELAY_TIMEOUT_MS : PUBLISH_TIMEOUT_MS;
+    const results = await Promise.allSettled(
+        events.map((event) =>
+            Promise.race([
+                _pool.publish([relay], event)[0],
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('publish timed out')), timeoutMs)),
+            ]),
+        ),
+    );
+    let sizeRejected = false;
+    results.forEach((result, i) => {
+        if (result.status === 'rejected') {
+            const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+            learnSizeLimitFromRejection(relay, events[i]!, reason);
+            if (SIZE_REJECTION_PATTERN.test(reason)) sizeRejected = true;
+        }
+    });
+    return { ok: results.every((r) => r.status === 'fulfilled'), sizeRejected };
 }
 
 /**
- * Filters NOSTR_RELAYS down to the ones known able to hold `dataEvent`, marking every excluded
- * relay 'skipped' for the UI. Throws if every relay is excluded.
- *
- * Must run — and its result must be reused, not recomputed — before the index event is built: the
- * index's `relays` tag records this exact list so a future fetch can prune to it directly instead
- * of re-deriving eligibility from a possibly-cold or since-changed relay size-limit cache. Computing
- * it twice risks the index claiming a different set than what was actually published to.
+ * One relay's full reactive-chunking attempt for the plan's data: try the whole event first, and
+ * only chunk — starting from a cache-informed guess, doubling on further rejection, capped at
+ * {@link MAX_CHUNKS} — if *this* relay rejects it for size. See the "Data-event chunking" section
+ * above for why this is always per-relay and reactive, never a pre-emptive exclusion.
  */
-function computeEligibleRelays(dataEvent: NostrEvent): string[] {
-    const dataSize = wireEventSize(dataEvent);
-    const eligibleRelays: string[] = [];
-    for (const relay of NOSTR_RELAYS) {
-        const maxLen = peekRelayLimits(relay).maxMessageLength;
-        if (maxLen !== undefined && dataSize > maxLen) {
-            _setHealth(relay, 'skipped');
-        } else {
-            eligibleRelays.push(relay);
-        }
+async function publishDataToRelay(
+    relay: string,
+    sk: Uint8Array,
+    planId: string,
+    createdAt: number,
+    gen: string,
+    sharedTags: string[][],
+    content: string,
+    wholeEvent: NostrEvent,
+): Promise<'connected' | 'skipped' | 'error'> {
+    const first = await tryPublishSet(relay, [wholeEvent]);
+    if (first.ok) return 'connected';
+    if (!first.sizeRejected) return 'error';
+
+    let n = startingChunkCount(wireEventSize(wholeEvent), peekRelayLimits(relay).maxMessageLength);
+    for (;;) {
+        const set = buildChunkSet(sk, planId, createdAt, gen, sharedTags, content, n);
+        const result = await tryPublishSet(relay, set);
+        if (result.ok) return 'connected';
+        if (!result.sizeRejected) return 'error';
+        if (n >= MAX_CHUNKS) return 'skipped';
+        n = Math.min(MAX_CHUNKS, n * 2);
     }
-    if (eligibleRelays.length === 0) {
-        throw new Error(
-            `This plan is too large for every configured relay (${Math.ceil(dataSize / 1024)}KB). Try removing some content.`,
-        );
-    }
-    return eligibleRelays;
 }
 
-/** Publishes a data+index event pair and verifies the index landed via a relay round-trip. */
-async function publishEventPair(
+/** The index never chunks (it's always small) — a plain single-event publish against the outer
+ *  whole-event race timeout. */
+async function publishIndexToRelay(relay: string, indexEvent: NostrEvent): Promise<boolean> {
+    return (await tryPublishSet(relay, [indexEvent])).ok;
+}
+
+/**
+ * Publishes a plan's data+index across every configured relay — each relay gets its own reactive
+ * chunking attempt for the data event via {@link publishDataToRelay}; nobody is pre-excluded upfront
+ * the way the old `computeEligibleRelays`/`publishEventPair` once did, since every relay can hold
+ * *something* via the retry ladder.
+ */
+async function publishChunkedPlan(
     pk: string,
+    sk: Uint8Array,
     planId: string,
-    dataEvent: NostrEvent,
+    createdAt: number,
+    sharedTags: string[][],
+    content: string,
     indexEvent: NostrEvent,
-    eligibleRelays: string[],
 ): Promise<void> {
-    _lastPublishedEvents = { index: indexEvent, data: dataEvent };
+    const gen = randomNonce();
+    _lastPublishedPlan = { planId, createdAt, gen, sharedTags, content, indexEvent };
+    const wholeEvent = buildWholeEvent(sk, planId, createdAt, gen, sharedTags, content);
 
-    const threshold = consensusThreshold(eligibleRelays.length);
-    _publishProgress.reset(eligibleRelays.length, threshold);
-
-    // Publish both events in parallel — data first so it's available when index arrives
-    const dataPublish = _pool.publish(eligibleRelays, dataEvent);
-    const indexPublish = _pool.publish(eligibleRelays, indexEvent);
+    const threshold = consensusThreshold(NOSTR_RELAYS.length);
+    _publishProgress.reset(NOSTR_RELAYS.length, threshold);
 
     let confirmed = 0;
-
-    const relayResults = await Promise.allSettled(
-        eligibleRelays.map(async (relay, i) => {
-            try {
-                await Promise.race([
-                    Promise.all([dataPublish[i], indexPublish[i]]),
-                    new Promise<never>((_, reject) =>
-                        setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS),
-                    ),
-                ]);
-                _setHealth(relay, 'connected');
-                _publishProgress.update(++confirmed);
-            } catch (ex) {
-                _setHealth(relay, 'error');
-                learnSizeLimitFromRejection(relay, dataEvent, ex instanceof Error ? ex.message : String(ex));
-                throw ex;
-            }
+    const perRelay = await Promise.allSettled(
+        NOSTR_RELAYS.map(async (relay) => {
+            _setHealth(relay, 'checking');
+            const [dataOutcome, indexOk] = await Promise.all([
+                publishDataToRelay(relay, sk, planId, createdAt, gen, sharedTags, content, wholeEvent),
+                publishIndexToRelay(relay, indexEvent),
+            ]);
+            const success = dataOutcome === 'connected' && indexOk;
+            _setHealth(relay, success ? 'connected' : dataOutcome === 'skipped' ? 'skipped' : 'error');
+            if (success) _publishProgress.update(++confirmed);
+            return { success, dataOutcome };
         }),
     );
 
-    const accepted = relayResults.filter((r) => r.status === 'fulfilled').length;
-    _publishProgress.finish(accepted >= threshold ? 'reached' : 'short', accepted);
+    const accepted = perRelay.filter((r) => r.status === 'fulfilled' && r.value.success).length;
+    const skipped = perRelay.filter((r) => r.status === 'fulfilled' && r.value.dataOutcome === 'skipped').length;
+    // A relay that exhausted the retry ladder was never going to hold this plan, the same way an
+    // excluded relay never counted against the majority under the old pre-filtered eligible-relays
+    // model — eligibility just isn't knowable in advance anymore under reactive chunking, only after
+    // the fact. Judging the outcome against every configured relay instead of just the ones that
+    // could ever succeed would report a misleading 'short' status for a publish that reached every
+    // relay actually able to hold it.
+    const effectiveThreshold = consensusThreshold(NOSTR_RELAYS.length - skipped);
+    _publishProgress.finish(accepted >= effectiveThreshold ? 'reached' : 'short', accepted);
     if (accepted === 0) {
+        const allSkipped = skipped === NOSTR_RELAYS.length;
+        if (allSkipped) {
+            throw new Error(
+                `This plan is too large for every configured relay (${Math.ceil(wireEventSize(wholeEvent) / 1024)}KB even after splitting into up to ${MAX_CHUNKS} pieces). Try removing some content.`,
+            );
+        }
         throw new Error('Could not publish — no relays responded. Check your internet connection and try again.');
     }
 
-    // eligibleRelays, not the default NOSTR_RELAYS — the relays excluded above never received the
-    // event, so querying the full relay list would need a majority out of a larger denominator than
-    // the one the publish itself was actually judged against, and could wait out a needless timeout.
-    const { event: stored } = await fanGetInternal(
-        { kinds: [PLAN_KIND], authors: [pk], '#d': [planId] },
-        eligibleRelays,
-    );
-
+    const { event: stored } = await fanGetInternal({ kinds: [PLAN_KIND], authors: [pk], '#d': [planId] }, NOSTR_RELAYS);
     if (!stored) {
         throw new Error('Verification failed — the plan was not found on any relay after publishing.');
     }
@@ -918,6 +1118,24 @@ async function publishEventPair(
                 'If you have multiple tabs open, close the others and try again.',
         );
     }
+}
+
+/** Retry publishing the last plan to a specific relay — re-runs the exact same reactive chunking
+ *  ladder {@link publishChunkedPlan} uses, rather than a single verbatim republish, so a relay that
+ *  needs chunking gets a real chance to succeed. */
+export async function retryRelay(relay: string): Promise<void> {
+    if (!_lastPublishedPlan) return;
+    const { planId, createdAt, gen, sharedTags, content, indexEvent } = _lastPublishedPlan;
+    _setHealth(relay, 'checking');
+
+    const sk = await getOrCreateSecretKey();
+    const wholeEvent = buildWholeEvent(sk, planId, createdAt, gen, sharedTags, content);
+    const [dataOutcome, indexOk] = await Promise.all([
+        publishDataToRelay(relay, sk, planId, createdAt, gen, sharedTags, content, wholeEvent),
+        publishIndexToRelay(relay, indexEvent),
+    ]);
+    const success = dataOutcome === 'connected' && indexOk;
+    _setHealth(relay, success ? 'connected' : dataOutcome === 'skipped' ? 'skipped' : 'error');
 }
 
 /**
@@ -966,49 +1184,31 @@ export async function publishPlan(
         dataContent = storedJson;
     }
 
-    // Data event (kind 30079) — full plan content, self-describing visibility via enc tag and
-    // compression via comp tag
-    const dataTags: string[][] = [
-        ['d', planId],
+    // Shared metadata tags carried on the data event's chunk 1 (or the whole event, when it fits in
+    // one piece) — see buildChunkSet.
+    const sharedTags: string[][] = [
         ['name', name],
         ['v', String(XIVPLAN_FORMAT_VERSION)],
     ];
     if (compressed) {
-        dataTags.push(['comp', 'gzip']);
+        sharedTags.push(['comp', 'gzip']);
     }
     if (visibility === 'private') {
-        dataTags.push(['enc', 'nip44-self']);
+        sharedTags.push(['enc', 'nip44-self']);
     }
-    const dataEvent = finalizeEvent(
-        {
-            kind: PLAN_DATA_KIND,
-            created_at: now,
-            tags: dataTags,
-            content: dataContent,
-        },
-        sk,
-    );
 
-    const eligibleRelays = computeEligibleRelays(dataEvent);
-
-    // Index event (kind 30078) — metadata + pointer to data event. Carries the data event's wire
-    // size and the exact relays it's eligible for, so a future fetch can learn both cheaply: the
-    // index is small enough that every relay can hold it regardless of the data event's size, so
-    // this lets fetchPlan prune to exactly the relays known able to hold the (possibly much larger)
-    // data event, instead of waiting out a connection timeout on a relay that was never going to
-    // have it.
+    // Index event (kind 30078) — pure vault-listing metadata. Never touched by the read path for
+    // opening a specific plan: every relay can hold *something* of the data event via the reactive
+    // chunking ladder, so there's no longer a need to pre-prune relays the way the (now removed)
+    // size/relays hint tags once did.
     const indexTags: string[][] = [
         ['d', planId],
         ['name', name],
         ['v', String(XIVPLAN_FORMAT_VERSION)],
-        ['e', dataEvent.id],
-        ['size', String(wireEventSize(dataEvent))],
-        ['relays', eligibleRelays.join(',')],
     ];
     if (visibility === 'private') {
         indexTags.push(['enc', 'nip44-self']);
     }
-
     const indexEvent = finalizeEvent(
         {
             kind: PLAN_KIND,
@@ -1019,7 +1219,7 @@ export async function publishPlan(
         sk,
     );
 
-    await publishEventPair(pk, planId, dataEvent, indexEvent, eligibleRelays);
+    await publishChunkedPlan(pk, sk, planId, now, sharedTags, dataContent, indexEvent);
 
     upsertVaultCacheEntry(pk, { id: planId, name, publishedAt: new Date(now * 1000), visibility });
 
@@ -1054,16 +1254,13 @@ export async function renamePlan(
     const pk = getPublicKey(sk);
     const now = Math.floor(Date.now() / 1000);
 
-    const { event: existingData } = await fanGetInternal({ kinds: [PLAN_DATA_KIND], authors: [pk], '#d': [id] });
-    if (!existingData) {
-        throw new Error(`Plan not found on any relay — cannot rename.`);
-    }
+    const { primary: existingData, content: existingContent } = await fetchPlanData(pk, id, false);
 
     const version = existingData.tags.find((t) => t[0] === 'v')?.[1] ?? String(XIVPLAN_FORMAT_VERSION);
     const currentVisibility = visibilityFromTags(existingData.tags);
     const compTag = existingData.tags.find((t) => t[0] === 'comp')?.[1];
 
-    let content = existingData.content;
+    let content = existingContent;
     if (newVisibility !== currentVisibility) {
         const convKey = nip44.getConversationKey(sk, pk);
         content = currentVisibility === 'private' ? nip44.decrypt(content, convKey) : nip44.encrypt(content, convKey);
@@ -1071,38 +1268,21 @@ export async function renamePlan(
 
     // Content is reused byte-for-byte (see doc comment above), so whatever compression it already
     // carries is preserved as-is — just forward the same comp tag rather than re-deciding it.
-    const dataTags: string[][] = [
-        ['d', id],
+    const sharedTags: string[][] = [
         ['name', newName],
         ['v', version],
     ];
     if (compTag) {
-        dataTags.push(['comp', compTag]);
+        sharedTags.push(['comp', compTag]);
     }
     if (newVisibility === 'private') {
-        dataTags.push(['enc', 'nip44-self']);
+        sharedTags.push(['enc', 'nip44-self']);
     }
-    const dataEvent = finalizeEvent(
-        {
-            kind: PLAN_DATA_KIND,
-            created_at: now,
-            tags: dataTags,
-            content,
-        },
-        sk,
-    );
 
-    // Recomputed rather than copied forward: re-encrypting/decrypting on a visibility change
-    // changes the data event's size (and therefore which relays are still eligible), so the old
-    // index's hints would otherwise go stale.
-    const eligibleRelays = computeEligibleRelays(dataEvent);
     const indexTags: string[][] = [
         ['d', id],
         ['name', newName],
         ['v', version],
-        ['e', dataEvent.id],
-        ['size', String(wireEventSize(dataEvent))],
-        ['relays', eligibleRelays.join(',')],
     ];
     if (newVisibility === 'private') {
         indexTags.push(['enc', 'nip44-self']);
@@ -1117,7 +1297,7 @@ export async function renamePlan(
         sk,
     );
 
-    await publishEventPair(pk, id, dataEvent, indexEvent, eligibleRelays);
+    await publishChunkedPlan(pk, sk, id, now, sharedTags, content, indexEvent);
 
     const entry: NostrPlanInfo = { id, name: newName, publishedAt: new Date(now * 1000), visibility: newVisibility };
     upsertVaultCacheEntry(pk, entry);
@@ -1136,12 +1316,128 @@ export interface FetchPlanResult {
 }
 
 /**
- * Short, capped lookup for the index event's `size` hint — just enough to learn (or fail to
- * learn) which relays are already known too small for the data event. Low-trust by design: a
- * wrong or missing hint only costs efficiency, never correctness, since the data fetch's own
- * consensus check is still what actually decides the returned content.
+ * Single relay, single query: collects whichever of `${planId}:2`..`${planId}:n` this relay has.
+ * Not built on {@link fanGet} — this isn't "pick a winner among relays," it's "collect N siblings
+ * from one relay we already know is holding the current winning version's primary chunk."
  */
-const INDEX_HINT_TIMEOUT_MS = 3000;
+async function fetchRemainingChunks(
+    relay: string,
+    pubkey: string,
+    planId: string,
+    n: number,
+): Promise<Map<number, NostrEvent>> {
+    const dTagToIndex = new Map<string, number>();
+    for (let i = 2; i <= n; i++) dTagToIndex.set(`${planId}:${i}`, i);
+    const result = new Map<number, NostrEvent>();
+    try {
+        const events = await _pool.querySync(
+            [relay],
+            { kinds: [PLAN_DATA_KIND], authors: [pubkey], '#d': [...dTagToIndex.keys()] },
+            { maxWait: RELAY_TIMEOUT_MS },
+        );
+        for (const event of events) {
+            const d = event.tags.find((t) => t[0] === 'd')?.[1];
+            const index = d ? dTagToIndex.get(d) : undefined;
+            if (index !== undefined) result.set(index, event);
+        }
+    } catch {
+        // No response from this relay — caller treats a partial/empty result as incomplete.
+    }
+    return result;
+}
+
+/**
+ * Fetches a plan's data, transparently reconstructing it from chunks when needed. Consensus is only
+ * load-bearing once — deciding which `created_at` (version) wins at the primary slot (`planId`),
+ * grouped by version rather than event id since relays can legitimately hold the same version as
+ * physically different chunk-1 events (different declared chunk count -> different bytes ->
+ * different id). Once a version wins, fetching its remaining chunks needs no further cross-relay
+ * confirmation for trust — every chunk is signed by the same key, so a relay can't forge content or
+ * lie about its own `chunk` tag. Reconstruction always pulls a complete set from *one* relay's own
+ * declared chunk count — chunks are never spliced across relays that used a different count for the
+ * same version.
+ */
+async function fetchPlanData(
+    pubkey: string,
+    planId: string,
+    trackUiStatus = true,
+): Promise<{
+    primary: NostrEvent;
+    /** The reconstructed relay's own full, ordered chunk set (length === chunkCountOf(primary)) —
+     *  repair republishes this verbatim, so it must be exactly what one relay actually holds. */
+    chunks: NostrEvent[];
+    content: string;
+    agreeingRelays: number;
+    totalRelays: number;
+    relayStatuses: Map<string, RelayHealth>;
+}> {
+    const {
+        event: primary,
+        agreeingRelays,
+        totalRelays,
+        relayStatuses,
+        relayEvents,
+        uiGeneration,
+    } = await fanGet(
+        { kinds: [PLAN_DATA_KIND], authors: [pubkey], '#d': [planId] },
+        NOSTR_RELAYS,
+        undefined,
+        undefined,
+        trackUiStatus,
+        // created_at alone has only 1-second resolution — two genuinely different publishes landing
+        // in the same second would otherwise be merged into one group. `gen` (see randomNonce) is
+        // what actually disambiguates them for anything published by this feature — but legacy data
+        // (published before `gen` existed) has none, so `genOf(e) || e.id` falls back to the event's
+        // own id in that case, exactly restoring the old id-based separation instead of merging two
+        // different legacy events that happen to share a created_at.
+        (e) => `${e.created_at}:${genOf(e) || e.id}`,
+    );
+    if (!primary) throw new Error(`Plan not found on any relay.`);
+
+    // Cheapest first: a relay whose own primary chunk is already '1/1' needs zero extra round trips.
+    const candidates = [...relayEvents.entries()].sort((a, b) => chunkCountOf(a[1]) - chunkCountOf(b[1]));
+    let content: string | undefined;
+    let chunks: NostrEvent[] | undefined;
+    for (const [relay, chunk1] of candidates) {
+        const n = chunkCountOf(chunk1);
+        if (n === 1) {
+            content = chunk1.content;
+            chunks = [chunk1];
+            break;
+        }
+        const rest = await fetchRemainingChunks(relay, pubkey, planId, n);
+        // A chunk only belongs to this relay's reconstruction if it matches the primary on version
+        // (created_at + gen) AND on the split itself (its own declared chunk count). The version
+        // check alone isn't enough: the retry ladder reuses the same created_at/gen across every
+        // rung of one publish attempt (2 -> 4 -> 8 chunks), so if a relay's per-d-tag replaceable-
+        // event tie-break (equal created_at resolves to lowest event id, not "most recent write")
+        // ever retains a stale rung's chunk alongside newer siblings, its `chunk` tag still declares
+        // the OLD rung's n — checking it here is what actually catches that, not just timestamp/gen.
+        const complete =
+            rest.size === n - 1 &&
+            [...rest.values()].every(
+                (c) => c.created_at === primary.created_at && genOf(c) === genOf(primary) && chunkCountOf(c) === n,
+            );
+        if (complete) {
+            const ordered = [chunk1, ...Array.from({ length: n - 1 }, (_, index) => rest.get(index + 2)!)];
+            content = joinChunks(ordered.map((e) => e.content));
+            chunks = ordered;
+            break;
+        }
+        // Holds the right version but couldn't deliver every chunk — distinct from 'stale' (wrong
+        // version) and 'error' (no response at all), and a repair target in its own right.
+        relayStatuses.set(relay, 'incomplete');
+        // Also correct the shared, user-visible store — fanGet already resolved by this point, so
+        // its own uiActive()-gated writes can't reach this late; the generation check here is the
+        // same guard, applied post-resolution, so a superseded fetch can't stomp a newer one's UI.
+        if (uiGeneration === _fetchGeneration) _setFetchStatus(relay, 'incomplete');
+    }
+    if (content === undefined || chunks === undefined) {
+        throw new Error('Plan data could not be fully retrieved from any relay — try again.');
+    }
+
+    return { primary, chunks, content, agreeingRelays, totalRelays, relayStatuses };
+}
 
 /**
  * Minimum independently-agreeing relays required before a fetch's winning event gets propagated
@@ -1152,108 +1448,106 @@ const INDEX_HINT_TIMEOUT_MS = 3000;
 const REPAIR_MIN_AGREEMENT = 2;
 
 /**
- * Read repair: fire-and-forget republish of a fetch's winning event to every relay that's
- * *confirmed* behind — one we actually heard back from with a different (older) event, i.e.
- * 'stale' — self-healing relays that missed an update, got pruned, or came back online with
- * outdated data. Deliberately excludes 'skipped'/'error' relays: we have no evidence at all about
- * what they currently hold (we either never heard from them, or gave up before they answered) —
- * pushing to them assumes they're behind, but they could just as easily be sitting on a genuinely
- * newer version we simply failed to fetch in time, and relying on every relay to correctly discard
- * an incoming write that's older than what it already has isn't a safe assumption to build on.
- * Never awaited by the caller and never throws; this is opportunistic housekeeping, not something
- * the user asked for, so a failed repair attempt should be invisible.
- *
- * Critical: `event` must be re-sent exactly as received — same `id`, `created_at`, `sig`, content.
- * Never re-sign or re-timestamp it. A relay only keeps the highest `created_at` per author+kind+
- * d-tag (NIP-33), so "repairing" with a freshened timestamp on a merely *reconstructed* copy could
- * make a stale version outrank a genuinely newer one we simply haven't seen yet, permanently
- * burying it on that relay the next time it actually shows up.
- *
- * `relayStatuses` must be the calling fanGet call's own {@link FanGetResult.relayStatuses} — never
- * the shared `getFetchStatus()` store, which a different, concurrently-running fetch could have
- * already overwritten with an unrelated plan's relay labels by the time this runs.
+ * One relay's repair attempt, two-tier. Tier 1 (always available, any plan whether owned or not):
+ * verbatim-republish the exact chunk set we reconstructed from — same ids/sigs/content, zero
+ * re-signing, so a stale version can never outrank a genuinely newer one we simply haven't seen yet
+ * (see the doc comment on {@link repairStaleRelays}). Tier 2 (owned plans only, `sk` available):
+ * if the verbatim set still doesn't fit this relay (it's more size-constrained than the relay we
+ * reconstructed from), fall back to the same reactive chunking ladder a fresh publish uses —
+ * reusing the *original* winning `created_at` exactly, never a fresh timestamp, so the repair never
+ * looks newer than the version it's actually repairing.
  */
-function repairStaleRelays(event: NostrEvent, agreeingRelays: number, relayStatuses: Map<string, RelayHealth>): void {
+async function repairOneRelay(
+    relay: string,
+    sk: Uint8Array | null,
+    planId: string,
+    createdAt: number,
+    gen: string,
+    sharedTags: string[][],
+    content: string,
+    chunks: NostrEvent[],
+): Promise<void> {
+    // Skip the doomed verbatim attempt outright if we already know this relay can't hold even the
+    // largest piece we're holding — but still give tier 2 (below) a chance to chunk further down.
+    const maxLen = peekRelayLimits(relay).maxMessageLength;
+    const maxChunkSize = Math.max(...chunks.map(wireEventSize));
+    const verbatim =
+        maxLen !== undefined && maxChunkSize > maxLen
+            ? { ok: false, sizeRejected: true }
+            : await tryPublishSet(relay, chunks);
+    if (verbatim.ok || !verbatim.sizeRejected || !sk) return;
+    const wholeEvent = buildWholeEvent(sk, planId, createdAt, gen, sharedTags, content);
+    await publishDataToRelay(relay, sk, planId, createdAt, gen, sharedTags, content, wholeEvent);
+}
+
+/**
+ * Read repair: fire-and-forget republish of a fetch's winning chunk set to every relay that's
+ * *confirmed* behind — one we actually heard back from with a different (older) version ('stale'),
+ * or the right version but an incomplete chunk set ('incomplete') — self-healing relays that missed
+ * an update, got pruned, or came back online with outdated/partial data. Deliberately excludes
+ * 'skipped'/'error' relays: we have no evidence at all about what they currently hold (we either
+ * never heard from them, or gave up before they answered) — pushing to them assumes they're behind,
+ * but they could just as easily be sitting on a genuinely newer version we simply failed to fetch in
+ * time, and relying on every relay to correctly discard an incoming write that's older than what it
+ * already has isn't a safe assumption to build on. Never awaited by the caller and never throws;
+ * this is opportunistic housekeeping, not something the user asked for, so a failed repair attempt
+ * should be invisible.
+ *
+ * `sk` is the *plan owner's* secret key, or null if the current session doesn't hold it (repairing
+ * someone else's public plan) — gates tier 2 above, since re-chunking requires signing new events as
+ * that pubkey.
+ *
+ * `relayStatuses` must be the calling {@link fetchPlanData}'s own `relayStatuses` — never the shared
+ * `getFetchStatus()` store, which a different, concurrently-running fetch could have already
+ * overwritten with an unrelated plan's relay labels by the time this runs.
+ */
+function repairStaleRelays(
+    sk: Uint8Array | null,
+    planId: string,
+    createdAt: number,
+    gen: string,
+    sharedTags: string[][],
+    content: string,
+    chunks: NostrEvent[],
+    agreeingRelays: number,
+    relayStatuses: Map<string, RelayHealth>,
+): void {
     if (agreeingRelays < REPAIR_MIN_AGREEMENT) return;
-    const eventSize = wireEventSize(event);
     const targets = [...relayStatuses]
-        .filter(([url, status]) => {
-            if (status !== 'stale') return false;
-            // A relay we've already confirmed can't hold an event this size (either via NIP-11 or
-            // a prior rejection learned in learnSizeLimitFromRejection) will never accept this
-            // repair either — skip it rather than repeating a doomed publish on every fetch.
-            const maxLen = peekRelayLimits(url).maxMessageLength;
-            return maxLen === undefined || eventSize <= maxLen;
-        })
+        .filter(([, status]) => status === 'stale' || status === 'incomplete')
         .map(([url]) => url);
-    if (targets.length === 0) return;
-    const results = _pool.publish(targets, event);
-    targets.forEach((relay, i) => {
-        void results[i]?.catch((err) => {
-            learnSizeLimitFromRejection(relay, event, err instanceof Error ? err.message : String(err));
-            // Best-effort — a relay that can't accept the repair right now might succeed on
-            // some future fetch instead. Nothing here should ever surface to the user.
-        });
-    });
+    for (const relay of targets) {
+        void repairOneRelay(relay, sk, planId, createdAt, gen, sharedTags, content, chunks);
+    }
 }
 
 export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanResult> {
-    // The index event is small enough that every relay can hold it regardless of the data event's
-    // size, so its `size` hint tells us in advance which relays are guaranteed not to have the
-    // (possibly much larger) data event. This runs concurrently with the data fetch below, rather
-    // than before it — awaiting it first would mean any relay that already answered the data
-    // fetch while we were still waiting on the (small, usually fast, but not guaranteed-fast)
-    // index lookup gets asked all over again. Instead, both start at once, and the moment the
-    // hint identifies a data relay as hopeless, that specific *still-pending* subscription is
-    // ended immediately — no restart, and relays that already responded keep their answers.
-    let pruneDataRelay: ((relay: string) => void) | undefined;
+    const {
+        primary: dataEvent,
+        chunks,
+        content: reconstructed,
+        agreeingRelays,
+        totalRelays,
+        relayStatuses,
+    } = await fetchPlanData(pubkey, id);
 
-    const dataPromise = fanGet(
-        { kinds: [PLAN_DATA_KIND], authors: [pubkey], '#d': [id] },
-        NOSTR_RELAYS,
-        undefined,
-        (prune) => {
-            pruneDataRelay = prune;
-        },
+    // Repair can only re-chunk (tier 2) as the plan's actual owner, since that means signing new
+    // chunk events under this pubkey — for someone else's public plan, only the verbatim tier 1
+    // republish (already-signed, zero re-signing) is available.
+    const ownSk = await getOrCreateSecretKey();
+    const repairSk = getPublicKey(ownSk) === pubkey ? ownSk : null;
+    const sharedTags = dataEvent.tags.filter((t) => t[0] !== 'd' && t[0] !== 'chunk' && t[0] !== 'gen');
+    repairStaleRelays(
+        repairSk,
+        id,
+        dataEvent.created_at,
+        genOf(dataEvent),
+        sharedTags,
+        reconstructed,
+        chunks,
+        agreeingRelays,
+        relayStatuses,
     );
-
-    // Internal hint lookup — not itself something the user's fetch-progress UI should reflect (see
-    // fanGetInternal's own note on why an auxiliary lookup can't drive the shared status/progress
-    // stores).
-    void fanGetInternal(
-        { kinds: [PLAN_KIND], authors: [pubkey], '#d': [id] },
-        NOSTR_RELAYS,
-        INDEX_HINT_TIMEOUT_MS,
-    ).then(({ event: indexEvent }) => {
-        if (!indexEvent) return;
-        const relaysTag = indexEvent.tags.find((t) => t[0] === 'relays')?.[1];
-        if (relaysTag !== undefined) {
-            // Authoritative: exactly the relays the publisher confirmed could hold this data at
-            // publish time. Prune everything else outright, instead of guessing from a
-            // possibly-cold or since-changed relay size-limit cache — this is what lets the
-            // consensus threshold shrink to match relays that can actually ever hold this plan,
-            // rather than being measured against every configured relay regardless of whether
-            // some of them were permanently excluded from ever receiving it.
-            const eligible = new Set(relaysTag.split(','));
-            for (const relay of NOSTR_RELAYS) {
-                if (!eligible.has(relay)) pruneDataRelay?.(relay);
-            }
-            return;
-        }
-        // Fallback for plans published before the `relays` tag existed: infer eligibility from
-        // the size hint and whatever relay limits have been learned so far this session.
-        const knownSize = Number(indexEvent.tags.find((t) => t[0] === 'size')?.[1]);
-        if (!Number.isFinite(knownSize)) return;
-        for (const relay of NOSTR_RELAYS) {
-            const maxLen = peekRelayLimits(relay).maxMessageLength;
-            if (maxLen !== undefined && knownSize > maxLen) pruneDataRelay?.(relay);
-        }
-    });
-
-    const { event: dataEvent, agreeingRelays, totalRelays, relayStatuses } = await dataPromise;
-    if (!dataEvent) throw new Error(`Plan not found on any relay.`);
-
-    repairStaleRelays(dataEvent, agreeingRelays, relayStatuses);
 
     const name = dataEvent.tags.find((t) => t[0] === 'name')?.[1] ?? id;
 
@@ -1272,7 +1566,7 @@ export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanRe
     } else {
         let looksLikeJson = false;
         try {
-            JSON.parse(dataEvent.content);
+            JSON.parse(reconstructed);
             looksLikeJson = true;
         } catch {
             /* encrypted */
@@ -1280,7 +1574,7 @@ export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanRe
         visibility = looksLikeJson ? 'public' : 'private';
     }
 
-    let content = dataEvent.content;
+    let content = reconstructed;
     if (visibility === 'private') {
         const sk = await getOrCreateSecretKey();
         const ownPk = getPublicKey(sk);
@@ -1310,19 +1604,30 @@ export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanRe
 
 // ── Delete (NIP-09) ───────────────────────────────────────────────────────────
 
-/** Sends a kind 5 deletion request for both the index and data events. */
+/**
+ * Sends a kind 5 deletion request for the index event and every possible data-event chunk slot.
+ * A chunked plan's chunks 2..N live at different d-tags (`${id}:2`..`${id}:MAX_CHUNKS`) than the
+ * primary (`id`), and different relays may have settled on different N for the same plan — there's
+ * no single record of "the max N any relay ever used" anywhere else, so this covers every d-tag a
+ * relay could possibly be holding rather than just the primary one.
+ */
 export async function deletePlan(id: string): Promise<void> {
     const sk = await getOrCreateSecretKey();
     const pk = getPublicKey(sk);
+
+    const tags: string[][] = [
+        ['a', `${PLAN_KIND}:${pk}:${id}`], // index event
+        ['a', `${PLAN_DATA_KIND}:${pk}:${id}`], // data event, chunk 1 (or the whole event, if unchunked)
+    ];
+    for (let i = 2; i <= MAX_CHUNKS; i++) {
+        tags.push(['a', `${PLAN_DATA_KIND}:${pk}:${id}:${i}`]);
+    }
 
     const event = finalizeEvent(
         {
             kind: 5,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                ['a', `${PLAN_KIND}:${pk}:${id}`], // index event
-                ['a', `${PLAN_DATA_KIND}:${pk}:${id}`], // data event
-            ],
+            tags,
             content: '',
         },
         sk,
