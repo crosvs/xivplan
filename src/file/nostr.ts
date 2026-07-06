@@ -825,19 +825,16 @@ export async function retryRelay(relay: string): Promise<void> {
     }
 }
 
-/** Publishes a data+index event pair and verifies the index landed via a relay round-trip. */
-async function publishEventPair(
-    pk: string,
-    planId: string,
-    dataEvent: NostrEvent,
-    indexEvent: NostrEvent,
-): Promise<void> {
-    _lastPublishedEvents = { index: indexEvent, data: dataEvent };
-
-    // Skip relays we already know will reject this event on size, instead of spending a full
-    // publish round-trip on a doomed attempt. A relay excluded this way was never going to be able
-    // to hold this event, so it shouldn't count against the required majority either — the
-    // threshold is based on the eligible relays only.
+/**
+ * Filters NOSTR_RELAYS down to the ones known able to hold `dataEvent`, marking every excluded
+ * relay 'skipped' for the UI. Throws if every relay is excluded.
+ *
+ * Must run — and its result must be reused, not recomputed — before the index event is built: the
+ * index's `relays` tag records this exact list so a future fetch can prune to it directly instead
+ * of re-deriving eligibility from a possibly-cold or since-changed relay size-limit cache. Computing
+ * it twice risks the index claiming a different set than what was actually published to.
+ */
+function computeEligibleRelays(dataEvent: NostrEvent): string[] {
     const dataSize = wireEventSize(dataEvent);
     const eligibleRelays: string[] = [];
     for (const relay of NOSTR_RELAYS) {
@@ -853,6 +850,18 @@ async function publishEventPair(
             `This plan is too large for every configured relay (${Math.ceil(dataSize / 1024)}KB). Try removing some content.`,
         );
     }
+    return eligibleRelays;
+}
+
+/** Publishes a data+index event pair and verifies the index landed via a relay round-trip. */
+async function publishEventPair(
+    pk: string,
+    planId: string,
+    dataEvent: NostrEvent,
+    indexEvent: NostrEvent,
+    eligibleRelays: string[],
+): Promise<void> {
+    _lastPublishedEvents = { index: indexEvent, data: dataEvent };
 
     const threshold = consensusThreshold(eligibleRelays.length);
     _publishProgress.reset(eligibleRelays.length, threshold);
@@ -971,17 +980,21 @@ export async function publishPlan(
         sk,
     );
 
+    const eligibleRelays = computeEligibleRelays(dataEvent);
+
     // Index event (kind 30078) — metadata + pointer to data event. Carries the data event's wire
-    // size so a future fetch can learn it cheaply: the index is small enough that every relay can
-    // hold it regardless of the data event's size, so this lets fetchPlan skip relays whose NIP-11
-    // limit is already known to be too small, instead of waiting out a connection timeout on a
-    // relay that was never going to have the (possibly much larger) data event.
+    // size and the exact relays it's eligible for, so a future fetch can learn both cheaply: the
+    // index is small enough that every relay can hold it regardless of the data event's size, so
+    // this lets fetchPlan prune to exactly the relays known able to hold the (possibly much larger)
+    // data event, instead of waiting out a connection timeout on a relay that was never going to
+    // have it.
     const indexTags: string[][] = [
         ['d', planId],
         ['name', name],
         ['v', String(XIVPLAN_FORMAT_VERSION)],
         ['e', dataEvent.id],
         ['size', String(wireEventSize(dataEvent))],
+        ['relays', eligibleRelays.join(',')],
     ];
     if (visibility === 'private') {
         indexTags.push(['enc', 'nip44-self']);
@@ -997,7 +1010,7 @@ export async function publishPlan(
         sk,
     );
 
-    await publishEventPair(pk, planId, dataEvent, indexEvent);
+    await publishEventPair(pk, planId, dataEvent, indexEvent, eligibleRelays);
 
     upsertVaultCacheEntry(pk, { id: planId, name, publishedAt: new Date(now * 1000), visibility });
 
@@ -1071,13 +1084,16 @@ export async function renamePlan(
     );
 
     // Recomputed rather than copied forward: re-encrypting/decrypting on a visibility change
-    // changes the data event's size, so the old index's hint would otherwise go stale.
+    // changes the data event's size (and therefore which relays are still eligible), so the old
+    // index's hints would otherwise go stale.
+    const eligibleRelays = computeEligibleRelays(dataEvent);
     const indexTags: string[][] = [
         ['d', id],
         ['name', newName],
         ['v', version],
         ['e', dataEvent.id],
         ['size', String(wireEventSize(dataEvent))],
+        ['relays', eligibleRelays.join(',')],
     ];
     if (newVisibility === 'private') {
         indexTags.push(['enc', 'nip44-self']);
@@ -1092,7 +1108,7 @@ export async function renamePlan(
         sk,
     );
 
-    await publishEventPair(pk, id, dataEvent, indexEvent);
+    await publishEventPair(pk, id, dataEvent, indexEvent, eligibleRelays);
 
     const entry: NostrPlanInfo = { id, name: newName, publishedAt: new Date(now * 1000), visibility: newVisibility };
     upsertVaultCacheEntry(pk, entry);
@@ -1197,8 +1213,25 @@ export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanRe
     // stores).
     void fanGetInternal({ kinds: [PLAN_KIND], authors: [pubkey], '#d': [id] }, NOSTR_RELAYS, INDEX_HINT_TIMEOUT_MS).then(
         ({ event: indexEvent }) => {
-            const knownSize = Number(indexEvent?.tags.find((t) => t[0] === 'size')?.[1]);
-            if (!indexEvent || !Number.isFinite(knownSize)) return;
+            if (!indexEvent) return;
+            const relaysTag = indexEvent.tags.find((t) => t[0] === 'relays')?.[1];
+            if (relaysTag !== undefined) {
+                // Authoritative: exactly the relays the publisher confirmed could hold this data at
+                // publish time. Prune everything else outright, instead of guessing from a
+                // possibly-cold or since-changed relay size-limit cache — this is what lets the
+                // consensus threshold shrink to match relays that can actually ever hold this plan,
+                // rather than being measured against every configured relay regardless of whether
+                // some of them were permanently excluded from ever receiving it.
+                const eligible = new Set(relaysTag.split(','));
+                for (const relay of NOSTR_RELAYS) {
+                    if (!eligible.has(relay)) pruneDataRelay?.(relay);
+                }
+                return;
+            }
+            // Fallback for plans published before the `relays` tag existed: infer eligibility from
+            // the size hint and whatever relay limits have been learned so far this session.
+            const knownSize = Number(indexEvent.tags.find((t) => t[0] === 'size')?.[1]);
+            if (!Number.isFinite(knownSize)) return;
             for (const relay of NOSTR_RELAYS) {
                 const maxLen = peekRelayLimits(relay).maxMessageLength;
                 if (maxLen !== undefined && knownSize > maxLen) pruneDataRelay?.(relay);
