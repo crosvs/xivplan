@@ -20,11 +20,11 @@ import type { NostrFileSource } from '../SceneProvider';
 import type { Scene } from '../scene';
 
 export const NOSTR_RELAYS = [
-    'wss://relay.nostr.band',
     'wss://nos.lol',
+    'wss://nostr.mom',
     'wss://relay.damus.io',
     'wss://relay.primal.net',
-    'wss://nostr.mom',
+    'wss://relay.snort.social',
 ];
 
 /**
