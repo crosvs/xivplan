@@ -125,7 +125,9 @@ export const CircularRelayIndicator: React.FC<CircularRelayIndicatorProps> = ({
     const determinate = progress !== undefined && progress.threshold > 0;
     const fraction = determinate ? Math.min(progress.agreeing, progress.threshold) / progress.threshold : 0;
     const ringColor =
-        determinate && progress.status === 'short' ? tokens.colorPaletteMarigoldBackground3 : tokens.colorBrandBackground;
+        determinate && progress.status === 'short'
+            ? tokens.colorPaletteMarigoldBackground3
+            : tokens.colorBrandBackground;
 
     return (
         <Tooltip

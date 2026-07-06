@@ -372,7 +372,9 @@ async function compressForStorage(json: string): Promise<{ content: string; comp
     if (!supportsCompression()) return { content: json, compressed: false };
     try {
         const gzipped = bytesToBase64Url(await gzipCompress(json));
-        return gzipped.length < json.length ? { content: gzipped, compressed: true } : { content: json, compressed: false };
+        return gzipped.length < json.length
+            ? { content: gzipped, compressed: true }
+            : { content: json, compressed: false };
     } catch {
         return { content: json, compressed: false };
     }
@@ -694,7 +696,7 @@ async function fanGet(
         // has had its full connect+query budget (mirrors the previous wait-for-all behavior).
         const fallbackHandle = setTimeout(() => {
             const best = bestSoFar();
-            finish(best, best ? relaysById.get(best.id)?.size ?? 0 : 0, 'timeout');
+            finish(best, best ? (relaysById.get(best.id)?.size ?? 0) : 0, 'timeout');
         }, fallbackTimeoutMs);
 
         if (uiActive()) {
@@ -816,7 +818,9 @@ export async function retryRelay(relay: string): Promise<void> {
     try {
         await Promise.race([
             Promise.all([dataPromises[0], indexPromises[0]]),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS)),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS),
+            ),
         ]);
         _setHealth(relay, 'connected');
     } catch (ex) {
@@ -877,7 +881,9 @@ async function publishEventPair(
             try {
                 await Promise.race([
                     Promise.all([dataPublish[i], indexPublish[i]]),
-                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS)),
+                    new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS),
+                    ),
                 ]);
                 _setHealth(relay, 'connected');
                 _publishProgress.update(++confirmed);
@@ -898,7 +904,10 @@ async function publishEventPair(
     // eligibleRelays, not the default NOSTR_RELAYS — the relays excluded above never received the
     // event, so querying the full relay list would need a majority out of a larger denominator than
     // the one the publish itself was actually judged against, and could wait out a needless timeout.
-    const { event: stored } = await fanGetInternal({ kinds: [PLAN_KIND], authors: [pk], '#d': [planId] }, eligibleRelays);
+    const { event: stored } = await fanGetInternal(
+        { kinds: [PLAN_KIND], authors: [pk], '#d': [planId] },
+        eligibleRelays,
+    );
 
     if (!stored) {
         throw new Error('Verification failed — the plan was not found on any relay after publishing.');
@@ -1211,33 +1220,35 @@ export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanRe
     // Internal hint lookup — not itself something the user's fetch-progress UI should reflect (see
     // fanGetInternal's own note on why an auxiliary lookup can't drive the shared status/progress
     // stores).
-    void fanGetInternal({ kinds: [PLAN_KIND], authors: [pubkey], '#d': [id] }, NOSTR_RELAYS, INDEX_HINT_TIMEOUT_MS).then(
-        ({ event: indexEvent }) => {
-            if (!indexEvent) return;
-            const relaysTag = indexEvent.tags.find((t) => t[0] === 'relays')?.[1];
-            if (relaysTag !== undefined) {
-                // Authoritative: exactly the relays the publisher confirmed could hold this data at
-                // publish time. Prune everything else outright, instead of guessing from a
-                // possibly-cold or since-changed relay size-limit cache — this is what lets the
-                // consensus threshold shrink to match relays that can actually ever hold this plan,
-                // rather than being measured against every configured relay regardless of whether
-                // some of them were permanently excluded from ever receiving it.
-                const eligible = new Set(relaysTag.split(','));
-                for (const relay of NOSTR_RELAYS) {
-                    if (!eligible.has(relay)) pruneDataRelay?.(relay);
-                }
-                return;
-            }
-            // Fallback for plans published before the `relays` tag existed: infer eligibility from
-            // the size hint and whatever relay limits have been learned so far this session.
-            const knownSize = Number(indexEvent.tags.find((t) => t[0] === 'size')?.[1]);
-            if (!Number.isFinite(knownSize)) return;
+    void fanGetInternal(
+        { kinds: [PLAN_KIND], authors: [pubkey], '#d': [id] },
+        NOSTR_RELAYS,
+        INDEX_HINT_TIMEOUT_MS,
+    ).then(({ event: indexEvent }) => {
+        if (!indexEvent) return;
+        const relaysTag = indexEvent.tags.find((t) => t[0] === 'relays')?.[1];
+        if (relaysTag !== undefined) {
+            // Authoritative: exactly the relays the publisher confirmed could hold this data at
+            // publish time. Prune everything else outright, instead of guessing from a
+            // possibly-cold or since-changed relay size-limit cache — this is what lets the
+            // consensus threshold shrink to match relays that can actually ever hold this plan,
+            // rather than being measured against every configured relay regardless of whether
+            // some of them were permanently excluded from ever receiving it.
+            const eligible = new Set(relaysTag.split(','));
             for (const relay of NOSTR_RELAYS) {
-                const maxLen = peekRelayLimits(relay).maxMessageLength;
-                if (maxLen !== undefined && knownSize > maxLen) pruneDataRelay?.(relay);
+                if (!eligible.has(relay)) pruneDataRelay?.(relay);
             }
-        },
-    );
+            return;
+        }
+        // Fallback for plans published before the `relays` tag existed: infer eligibility from
+        // the size hint and whatever relay limits have been learned so far this session.
+        const knownSize = Number(indexEvent.tags.find((t) => t[0] === 'size')?.[1]);
+        if (!Number.isFinite(knownSize)) return;
+        for (const relay of NOSTR_RELAYS) {
+            const maxLen = peekRelayLimits(relay).maxMessageLength;
+            if (maxLen !== undefined && knownSize > maxLen) pruneDataRelay?.(relay);
+        }
+    });
 
     const { event: dataEvent, agreeingRelays, totalRelays, relayStatuses } = await dataPromise;
     if (!dataEvent) throw new Error(`Plan not found on any relay.`);

@@ -565,7 +565,10 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                             appearance="subtle"
                             icon={
                                 vaultState.loading ? (
-                                    <CircularRelayIndicator relayStatus={relayStatus} labels={CONNECTIVITY_STATUS_LABELS} />
+                                    <CircularRelayIndicator
+                                        relayStatus={relayStatus}
+                                        labels={CONNECTIVITY_STATUS_LABELS}
+                                    />
                                 ) : (
                                     <ArrowClockwiseRegular />
                                 )
@@ -762,7 +765,10 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                                         onClick={() => currentPubkey && loadVault(currentPubkey, vaultUntil)}
                                     >
                                         {vaultState.loading ? (
-                                            <CircularRelayIndicator relayStatus={relayStatus} labels={CONNECTIVITY_STATUS_LABELS} />
+                                            <CircularRelayIndicator
+                                                relayStatus={relayStatus}
+                                                labels={CONNECTIVITY_STATUS_LABELS}
+                                            />
                                         ) : (
                                             'Load more'
                                         )}
@@ -821,7 +827,10 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                             disabled={!duplicateName.trim() || duplicateState.loading}
                             icon={
                                 duplicateState.loading ? (
-                                    <CircularRelayIndicator relayStatus={relayStatus} labels={CONNECTIVITY_STATUS_LABELS} />
+                                    <CircularRelayIndicator
+                                        relayStatus={relayStatus}
+                                        labels={CONNECTIVITY_STATUS_LABELS}
+                                    />
                                 ) : undefined
                             }
                             onClick={startDuplicate}
@@ -892,7 +901,10 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
                             disabled={!editName.trim() || editState.loading || !editHasChanges}
                             icon={
                                 editState.loading ? (
-                                    <CircularRelayIndicator relayStatus={relayStatus} labels={CONNECTIVITY_STATUS_LABELS} />
+                                    <CircularRelayIndicator
+                                        relayStatus={relayStatus}
+                                        labels={CONNECTIVITY_STATUS_LABELS}
+                                    />
                                 ) : undefined
                             }
                             onClick={startEdit}
