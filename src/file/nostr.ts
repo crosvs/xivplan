@@ -46,16 +46,24 @@ export const PLAN_DATA_KIND = 30079;
 /** Incremented when the event structure changes in a backwards-incompatible way. */
 export const XIVPLAN_FORMAT_VERSION = 1;
 
-/** Per-relay timeout for read operations (ms). */
-const RELAY_TIMEOUT_MS = 12000;
+/**
+ * Per-relay timeout for read operations (ms). Also the pool's `maxWaitForConnection` budget (see
+ * `_pool` below) — every other relay-facing timeout in this file derives from this one constant so
+ * they can't drift out of sync with each other the way the hardcoded values here once did.
+ */
+const RELAY_TIMEOUT_MS = 5000;
 
 /**
- * Extra time {@link fanGet} waits beyond RELAY_TIMEOUT_MS before giving up. RELAY_TIMEOUT_MS is
- * also the pool's `maxWaitForConnection` budget, so a relay that takes the full RELAY_TIMEOUT_MS
- * just to open its WebSocket would otherwise have no time left to actually answer — this grace
- * period is what's left over for the query/response after a maximal-length connection.
+ * Extra time {@link fanGet} (for reads) and the publish race (for writes) wait beyond
+ * RELAY_TIMEOUT_MS before giving up. RELAY_TIMEOUT_MS is also the pool's `maxWaitForConnection`
+ * budget, so a relay that takes the full RELAY_TIMEOUT_MS just to open its WebSocket would
+ * otherwise have no time left to actually answer — this grace period is what's left over for the
+ * query/response (or the publish OK) after a maximal-length connection.
  */
 const QUERY_GRACE_MS = 2000;
+
+/** Outer race timeout for a single relay's publish attempt — see {@link QUERY_GRACE_MS}. */
+const PUBLISH_TIMEOUT_MS = RELAY_TIMEOUT_MS + QUERY_GRACE_MS;
 
 // Single long-lived pool — connections are reused across operations.
 // Built on AbstractSimplePool rather than SimplePool because SimplePool's constructor type
@@ -113,6 +121,12 @@ export function getRelayStatus(): Array<{ url: string; status: RelayHealth }> {
 const _fetchStatus = new Map<string, RelayHealth>();
 const _fetchListeners = new Set<() => void>();
 let _fetchSnapshot: Array<{ url: string; status: RelayHealth }> | null = null;
+
+// Bumped by every UI-tracked fanGet call on start, so an older call whose fetch is still running
+// can tell it's no longer the latest and stop writing to the shared stores above — otherwise two
+// concurrent tracked fetches (e.g. opening a second plan before the first resolves) would each
+// think they own `_fetchStatus`/`_fetchProgress` and stomp each other's display.
+let _fetchGeneration = 0;
 
 function _resetFetchStatus(relays: string[]): void {
     _fetchStatus.clear();
@@ -284,7 +298,7 @@ export async function probeRelays(): Promise<void> {
         await Promise.allSettled(
             NOSTR_RELAYS.map(async (relay) => {
                 try {
-                    await _pool.get([relay], { kinds: [PLAN_KIND], since: futureTs }, { maxWait: 5000 });
+                    await _pool.get([relay], { kinds: [PLAN_KIND], since: futureTs }, { maxWait: RELAY_TIMEOUT_MS });
                     _setHealth(relay, 'connected');
                 } catch {
                     _setHealth(relay, 'error');
@@ -515,6 +529,13 @@ export interface FanGetResult {
     agreeingRelays: number;
     /** Total relays queried. */
     totalRelays: number;
+    /**
+     * This call's own final per-relay labels — computed regardless of `trackUiStatus`, so a caller
+     * that needs to act on them (e.g. read-repair) can use data intrinsic to *this* fetch instead of
+     * re-reading the shared `_fetchStatus` store, which a concurrently-running fetch for a different
+     * plan could have already overwritten by the time the caller gets around to reading it.
+     */
+    relayStatuses: Map<string, RelayHealth>;
 }
 
 /**
@@ -550,6 +571,15 @@ async function fanGet(
     // stores, and the auxiliary one finishing first would wrongly freeze the UI as "done".
     trackUiStatus: boolean = true,
 ): Promise<FanGetResult> {
+    // Captured once up front: this call "owns" the shared UI stores only as long as no newer
+    // UI-tracked fanGet call has started since. A stale call whose fetch is still running when a
+    // fresher one begins silently stops writing to `_fetchStatus`/`_fetchProgress` instead of
+    // fighting the newer call for control of what the user is currently looking at.
+    const myGeneration = trackUiStatus ? ++_fetchGeneration : -1;
+    function uiActive(): boolean {
+        return trackUiStatus && myGeneration === _fetchGeneration;
+    }
+
     return new Promise((resolve) => {
         const events = new Map<string, NostrEvent>();
         const relaysById = new Map<string, Set<string>>();
@@ -569,12 +599,25 @@ async function fanGet(
             return best;
         }
 
+        // This call's own view of each relay's label, independent of `trackUiStatus`/`uiActive()` —
+        // callers that need to act on the result (e.g. read-repair) key off this instead of the
+        // shared, mutable `_fetchStatus` store. `best: null` means no event has arrived yet.
+        function relayLabels(best: NostrEvent | null): Map<string, RelayHealth> {
+            const labels = new Map<string, RelayHealth>();
+            if (!best) return labels;
+            for (const [id, supporters] of relaysById) {
+                const label = id === best.id ? 'connected' : 'stale';
+                for (const relay of supporters) labels.set(relay, label);
+            }
+            return labels;
+        }
+
         // Once the fetch concludes, every relay still 'checking' gets a terminal status: 'skipped'
         // if we stopped listening because consensus was already reached elsewhere (not a failure),
         // or 'error' if we simply ran out of patience without ever hearing from it. Pruned relays
         // already got their own (equally non-failure) 'skipped' status when they were pruned.
         function settleStragglers(outcome: 'consensus' | 'timeout'): void {
-            if (!trackUiStatus) return;
+            if (!uiActive()) return;
             for (const relay of relays) {
                 if (_fetchStatus.get(relay) === 'checking') {
                     _setFetchStatus(relay, outcome === 'consensus' ? 'skipped' : 'error');
@@ -590,13 +633,8 @@ async function fanGet(
         // with each other" — relays get relabeled the moment a newer competing event outranks
         // theirs, same rule `bestSoFar()`/the timeout fallback would use if it resolved right now.
         function updateRelayLabels(): void {
-            if (!trackUiStatus) return;
-            const best = bestSoFar();
-            if (!best) return;
-            for (const [id, supporters] of relaysById) {
-                const label = id === best.id ? 'connected' : 'stale';
-                for (const relay of supporters) _setFetchStatus(relay, label);
-            }
+            if (!uiActive()) return;
+            for (const [relay, label] of relayLabels(bestSoFar())) _setFetchStatus(relay, label);
         }
 
         function finish(best: NostrEvent | null, agreeingRelays: number, outcome: 'consensus' | 'timeout'): void {
@@ -605,8 +643,13 @@ async function fanGet(
             clearTimeout(fallbackHandle);
             settleStragglers(outcome);
             updateRelayLabels();
-            if (trackUiStatus) _fetchProgress.finish(outcome === 'consensus' ? 'reached' : 'short', agreeingRelays);
-            resolve({ event: best, agreeingRelays, totalRelays: relays.length - prunedRelays.size });
+            if (uiActive()) _fetchProgress.finish(outcome === 'consensus' ? 'reached' : 'short', agreeingRelays);
+            resolve({
+                event: best,
+                agreeingRelays,
+                totalRelays: relays.length - prunedRelays.size,
+                relayStatuses: relayLabels(best),
+            });
             for (const closer of closers.values()) closer.close('fanGet: resolved');
         }
 
@@ -627,7 +670,7 @@ async function fanGet(
                     return;
                 }
             }
-            if (trackUiStatus) _fetchProgress.update(bestAgreement);
+            if (uiActive()) _fetchProgress.update(bestAgreement);
             // Pruning can shrink `active` to nothing without ever reaching consensus (e.g. every
             // remaining relay turned out too small) — nothing else will ever call finish() in that
             // case, so resolve now with whatever's on hand instead of waiting out the full timeout.
@@ -640,7 +683,7 @@ async function fanGet(
             if (resolved || !active.has(relay)) return;
             active.delete(relay);
             prunedRelays.add(relay);
-            if (trackUiStatus && _fetchStatus.get(relay) === 'checking') _setFetchStatus(relay, 'skipped');
+            if (uiActive() && _fetchStatus.get(relay) === 'checking') _setFetchStatus(relay, 'skipped');
             closers.get(relay)?.close('fanGet: pruned');
             checkConsensus();
         }
@@ -654,7 +697,7 @@ async function fanGet(
             finish(best, best ? relaysById.get(best.id)?.size ?? 0 : 0, 'timeout');
         }, fallbackTimeoutMs);
 
-        if (trackUiStatus) {
+        if (uiActive()) {
             _resetFetchStatus(relays);
             _fetchProgress.reset(relays.length, threshold());
         }
@@ -666,7 +709,7 @@ async function fanGet(
                     maxWait: RELAY_TIMEOUT_MS,
                     onevent: (event) => {
                         active.delete(relay);
-                        if (trackUiStatus) _setFetchStatus(relay, 'connected');
+                        if (uiActive()) _setFetchStatus(relay, 'connected');
                         events.set(event.id, event);
                         let relaySet = relaysById.get(event.id);
                         if (!relaySet) {
@@ -682,7 +725,7 @@ async function fanGet(
                         // small) shouldn't retroactively look like they failed.
                         if (reasons[0] !== 'fanGet: resolved' && reasons[0] !== 'fanGet: pruned') {
                             active.delete(relay);
-                            if (trackUiStatus && _fetchStatus.get(relay) === 'checking') _setFetchStatus(relay, 'error');
+                            if (uiActive() && _fetchStatus.get(relay) === 'checking') _setFetchStatus(relay, 'error');
                             checkConsensus();
                         }
                     },
@@ -690,6 +733,21 @@ async function fanGet(
             ]),
         );
     });
+}
+
+/**
+ * Internal/auxiliary lookup — same fan-out/consensus logic as {@link fanGet}, but for a call that
+ * is never itself the operation the user is watching progress for (a verification round-trip after
+ * publishing, a rename's pre-read, a size-hint lookup alongside a real fetch). Always opts out of
+ * the shared fetch-status/progress UI so it can never be mistaken for — or stomp on — whichever
+ * fetch actually is user-visible right now.
+ */
+function fanGetInternal(
+    filter: Parameters<AbstractSimplePool['subscribeMany']>[1],
+    relays: string[] = NOSTR_RELAYS,
+    fallbackTimeoutMs?: number,
+): Promise<FanGetResult> {
+    return fanGet(filter, relays, fallbackTimeoutMs, undefined, false);
 }
 
 async function fanQuery(filter: Parameters<AbstractSimplePool['querySync']>[1]): Promise<NostrEvent[]> {
@@ -758,7 +816,7 @@ export async function retryRelay(relay: string): Promise<void> {
     try {
         await Promise.race([
             Promise.all([dataPromises[0], indexPromises[0]]),
-            new Promise<never>((_, reject) => setTimeout(reject, 10000)),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS)),
         ]);
         _setHealth(relay, 'connected');
     } catch (ex) {
@@ -810,7 +868,7 @@ async function publishEventPair(
             try {
                 await Promise.race([
                     Promise.all([dataPublish[i], indexPublish[i]]),
-                    new Promise<never>((_, reject) => setTimeout(reject, 10000)),
+                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('publish timed out')), PUBLISH_TIMEOUT_MS)),
                 ]);
                 _setHealth(relay, 'connected');
                 _publishProgress.update(++confirmed);
@@ -828,7 +886,10 @@ async function publishEventPair(
         throw new Error('Could not publish — no relays responded. Check your internet connection and try again.');
     }
 
-    const { event: stored } = await fanGet({ kinds: [PLAN_KIND], authors: [pk], '#d': [planId] });
+    // eligibleRelays, not the default NOSTR_RELAYS — the relays excluded above never received the
+    // event, so querying the full relay list would need a majority out of a larger denominator than
+    // the one the publish itself was actually judged against, and could wait out a needless timeout.
+    const { event: stored } = await fanGetInternal({ kinds: [PLAN_KIND], authors: [pk], '#d': [planId] }, eligibleRelays);
 
     if (!stored) {
         throw new Error('Verification failed — the plan was not found on any relay after publishing.');
@@ -971,7 +1032,7 @@ export async function renamePlan(
     const pk = getPublicKey(sk);
     const now = Math.floor(Date.now() / 1000);
 
-    const { event: existingData } = await fanGet({ kinds: [PLAN_DATA_KIND], authors: [pk], '#d': [id] });
+    const { event: existingData } = await fanGetInternal({ kinds: [PLAN_DATA_KIND], authors: [pk], '#d': [id] });
     if (!existingData) {
         throw new Error(`Plan not found on any relay — cannot rename.`);
     }
@@ -1082,12 +1143,16 @@ const REPAIR_MIN_AGREEMENT = 2;
  * d-tag (NIP-33), so "repairing" with a freshened timestamp on a merely *reconstructed* copy could
  * make a stale version outrank a genuinely newer one we simply haven't seen yet, permanently
  * burying it on that relay the next time it actually shows up.
+ *
+ * `relayStatuses` must be the calling fanGet call's own {@link FanGetResult.relayStatuses} — never
+ * the shared `getFetchStatus()` store, which a different, concurrently-running fetch could have
+ * already overwritten with an unrelated plan's relay labels by the time this runs.
  */
-function repairStaleRelays(event: NostrEvent, agreeingRelays: number): void {
+function repairStaleRelays(event: NostrEvent, agreeingRelays: number, relayStatuses: Map<string, RelayHealth>): void {
     if (agreeingRelays < REPAIR_MIN_AGREEMENT) return;
     const eventSize = wireEventSize(event);
-    const targets = getFetchStatus()
-        .filter(({ url, status }) => {
+    const targets = [...relayStatuses]
+        .filter(([url, status]) => {
             if (status !== 'stale') return false;
             // A relay we've already confirmed can't hold an event this size (either via NIP-11 or
             // a prior rejection learned in learnSizeLimitFromRejection) will never accept this
@@ -1095,7 +1160,7 @@ function repairStaleRelays(event: NostrEvent, agreeingRelays: number): void {
             const maxLen = peekRelayLimits(url).maxMessageLength;
             return maxLen === undefined || eventSize <= maxLen;
         })
-        .map(({ url }) => url);
+        .map(([url]) => url);
     if (targets.length === 0) return;
     const results = _pool.publish(targets, event);
     targets.forEach((relay, i) => {
@@ -1127,16 +1192,10 @@ export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanRe
         },
     );
 
-    // trackUiStatus: false — this is an internal hint lookup, not itself something the user's
-    // fetch-progress UI should reflect (see fanGet's own note on why two concurrent calls can't
-    // both drive the same shared status/progress stores).
-    void fanGet(
-        { kinds: [PLAN_KIND], authors: [pubkey], '#d': [id] },
-        NOSTR_RELAYS,
-        INDEX_HINT_TIMEOUT_MS,
-        undefined,
-        false,
-    ).then(
+    // Internal hint lookup — not itself something the user's fetch-progress UI should reflect (see
+    // fanGetInternal's own note on why an auxiliary lookup can't drive the shared status/progress
+    // stores).
+    void fanGetInternal({ kinds: [PLAN_KIND], authors: [pubkey], '#d': [id] }, NOSTR_RELAYS, INDEX_HINT_TIMEOUT_MS).then(
         ({ event: indexEvent }) => {
             const knownSize = Number(indexEvent?.tags.find((t) => t[0] === 'size')?.[1]);
             if (!indexEvent || !Number.isFinite(knownSize)) return;
@@ -1147,10 +1206,10 @@ export async function fetchPlan(pubkey: string, id: string): Promise<FetchPlanRe
         },
     );
 
-    const { event: dataEvent, agreeingRelays, totalRelays } = await dataPromise;
+    const { event: dataEvent, agreeingRelays, totalRelays, relayStatuses } = await dataPromise;
     if (!dataEvent) throw new Error(`Plan not found on any relay.`);
 
-    repairStaleRelays(dataEvent, agreeingRelays);
+    repairStaleRelays(dataEvent, agreeingRelays, relayStatuses);
 
     const name = dataEvent.tags.find((t) => t[0] === 'name')?.[1] ?? id;
 
