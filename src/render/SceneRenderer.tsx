@@ -23,7 +23,7 @@ import { usePreviewMode } from '../usePreviewMode';
 import { clamp } from '../util';
 import { MAX_ZOOM, MIN_ZOOM, ViewTransform } from '../ViewTransformContext';
 import { useViewTransform } from '../useViewTransform';
-import { StaticPlaybackProvider, useDisplayObjects } from '../playback/PlaybackContext';
+import { StaticPlaybackProvider, useDisplayObjects, useOptionalPlayback } from '../playback/PlaybackContext';
 import { ArenaRenderer } from './ArenaRenderer';
 import { DisplayObjectsContext } from './DisplayObjectsContext';
 import { DrawTarget } from './DrawTarget';
@@ -427,12 +427,19 @@ const SceneContents: React.FC<SceneContentsProps> = ({
 }) => {
     listening = listening ?? true;
 
-    const { scene } = useScene();
+    const { scene, stepIndex } = useScene();
     const step = useCurrentStep();
 
     // In playback mode, useDisplayObjects returns interpolated objects.
     // In edit mode (or when used outside PlaybackProvider, e.g. ScenePreview), returns step.objects.
     const objects = useDisplayObjects(scene, step.objects);
+
+    // Entering objects (tagged _ceilOnly by useDisplayObjects) only exist in the "next" step of the
+    // current transition, so they should only be hit-testable once the reducer's currentStep has
+    // actually caught up to that step (see getCurrentStepIndex) -- otherwise clicking one would
+    // select/drag an object that isn't part of the step currently being edited.
+    const playback = useOptionalPlayback();
+    const enteringObjectsSelectable = playback ? stepIndex === Math.ceil(playback.state.playbackTime) : true;
 
     return (
         <DisplayObjectsContext value={objects}>
@@ -440,13 +447,25 @@ const SceneContents: React.FC<SceneContentsProps> = ({
 
             <Layer name={LayerName.Ground} listening={listening}>
                 <ArenaRenderer backgroundColor={backgroundColor} simple={simple} />
-                <ObjectRenderer objects={objects} layer={LayerName.Ground} />
+                <ObjectRenderer
+                    objects={objects}
+                    layer={LayerName.Ground}
+                    enteringObjectsSelectable={enteringObjectsSelectable}
+                />
             </Layer>
             <Layer name={LayerName.Default} listening={listening}>
-                <ObjectRenderer objects={objects} layer={LayerName.Default} />
+                <ObjectRenderer
+                    objects={objects}
+                    layer={LayerName.Default}
+                    enteringObjectsSelectable={enteringObjectsSelectable}
+                />
             </Layer>
             <Layer name={LayerName.Foreground} listening={listening}>
-                <ObjectRenderer objects={objects} layer={LayerName.Foreground} />
+                <ObjectRenderer
+                    objects={objects}
+                    layer={LayerName.Foreground}
+                    enteringObjectsSelectable={enteringObjectsSelectable}
+                />
 
                 <TetherEditRenderer />
             </Layer>

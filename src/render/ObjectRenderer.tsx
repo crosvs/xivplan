@@ -9,6 +9,8 @@ import { getLayerName, getRenderer } from './ObjectRegistry';
 export interface ObjectRendererProps {
     objects: readonly SceneObject[];
     layer: LayerName;
+    /** Whether _ceilOnly (entering) objects should be hit-testable right now -- see SceneRenderer. */
+    enteringObjectsSelectable?: boolean;
 }
 
 function getPulse(object: SceneObject): PulseStyle {
@@ -78,7 +80,7 @@ const StaticObjectGroup = memo(function StaticObjectGroup({ object, listening, C
     );
 });
 
-export const ObjectRenderer: React.FC<ObjectRendererProps> = ({ objects, layer }) => {
+export const ObjectRenderer: React.FC<ObjectRendererProps> = ({ objects, layer, enteringObjectsSelectable = true }) => {
     return (
         <>
             {objects.map((object) => {
@@ -86,9 +88,9 @@ export const ObjectRenderer: React.FC<ObjectRendererProps> = ({ objects, layer }
                     return null;
                 }
 
-                // _ceilOnly: entering objects from next step — disable hit-testing
+                // _ceilOnly: entering objects from next step — only hit-test once that step is current
                 const ceilOnly = (object as { _ceilOnly?: boolean })._ceilOnly === true;
-                const listening = !ceilOnly;
+                const listening = !ceilOnly || enteringObjectsSelectable;
                 const hasPulse = getPulse(object) !== 'none';
                 const Component = getRenderer(object);
 

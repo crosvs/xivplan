@@ -13,7 +13,7 @@ import { DetailsPanel } from './panel/DetailsPanel';
 import { MainPanel } from './panel/MainPanel';
 import { getPanelStageCount } from './panel/panelStages';
 import { PortraitPanels } from './panel/PortraitPanels';
-import { PlaybackProvider, usePlayback, usePlaybackDispatch } from './playback/PlaybackContext';
+import { getCurrentStepIndex, PlaybackProvider, usePlayback, usePlaybackDispatch } from './playback/PlaybackContext';
 import { PlaybackTimeline } from './playback/PlaybackTimeline';
 import { SceneRenderer } from './render/SceneRenderer';
 import { MIN_STAGE_WIDTH, MIN_STAGE_WIDTH_PX } from './theme';
@@ -39,25 +39,25 @@ export const MainPage: React.FC = () => {
 };
 
 /**
- * Null-rendering bridge: subscribes to PlaybackContext and dispatches setStep at
- * integer boundaries so SceneProvider's currentStep tracks floor(playbackTime).
- * Lives as a sibling of the main content so its 60fps re-renders during playback
- * don't cascade to the entire page subtree.
+ * Null-rendering bridge: subscribes to PlaybackContext and dispatches setStep as
+ * playbackTime crosses each step's midpoint, so SceneProvider's currentStep tracks
+ * getCurrentStepIndex(playbackTime). Lives as a sibling of the main content so its
+ * 60fps re-renders during playback don't cascade to the entire page subtree.
  */
 const PlaybackSyncer: React.FC = () => {
     const { scene, dispatch } = useScene();
     const { state } = usePlayback();
     const { playbackTime, isPlaying } = state;
     const maxStep = scene.steps.length - 1;
-    const floorStep = Math.min(Math.floor(playbackTime), maxStep);
+    const currentStep = getCurrentStepIndex(playbackTime, maxStep);
     useEffect(() => {
         // During auto-play the renderer interpolates directly from scene.steps[], so
         // SceneProvider's currentStep doesn't need to track every step boundary.
         // We only sync on scrub/pause so editing interactions use the right step.
         if (!isPlaying) {
-            dispatch({ type: 'setStep', index: floorStep, transient: true });
+            dispatch({ type: 'setStep', index: currentStep, transient: true });
         }
-    }, [floorStep, isPlaying, dispatch]);
+    }, [currentStep, isPlaying, dispatch]);
     return null;
 };
 
@@ -88,8 +88,8 @@ const MainPageContent: React.FC = () => {
 
     // When the user edits the scene, snap playbackTime to the reducer's current step and stop
     // playing. Using stepIndexRef means addStep (which sets currentStep = newStep) will jump the
-    // slider to the new step, while normal edits (drag etc.) keep floor(playbackTime) since
-    // PlaybackSyncer already keeps stepIndex = floor(playbackTime) during scrub/play.
+    // slider to the new step, while normal edits (drag etc.) keep playbackTime as-is since
+    // PlaybackSyncer already keeps stepIndex = getCurrentStepIndex(playbackTime) during scrub/play.
     const initialSceneRef = useRef(scene);
     useEffect(() => {
         if (scene !== initialSceneRef.current) {
@@ -109,7 +109,7 @@ const MainPageContent: React.FC = () => {
         <>
             <title>{title}</title>
 
-            {/* Keeps SceneProvider's currentStep = floor(playbackTime) during play/scrub.
+            {/* Keeps SceneProvider's currentStep = getCurrentStepIndex(playbackTime) during play/scrub.
                 Rendered as a sibling so its 60fps subscription doesn't cascade to the page. */}
             <PlaybackSyncer />
 
