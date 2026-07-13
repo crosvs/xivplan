@@ -203,8 +203,10 @@ export const PlaybackTimeline: React.FC = () => {
                 {inlineRow}
             </div>
 
-            {/* Timeline slider */}
-            <div className={classes.sliderRow}>
+            {/* Timeline slider and step markers share a single row: the markers overlay the
+                slider's rail (absolutely positioned, vertically centered on it) instead of
+                occupying a row of their own underneath it. */}
+            <div className={classes.timelineRow}>
                 <Slider
                     className={classes.slider}
                     min={0}
@@ -213,14 +215,14 @@ export const PlaybackTimeline: React.FC = () => {
                     value={playbackTime}
                     onChange={handleSliderChange}
                 />
-            </div>
 
-            {/* Step markers — isolated component so that:
-                  - memo() skips re-renders when currentStepIndex doesn't change (most 60fps frames)
-                  - selection/similar changes don't re-render the slider/controls above */}
-            {stepCount > 1 && (
-                <PlaybackStepMarkers stepCount={stepCount} maxStep={maxStep} currentStepIndex={currentStepIndex} />
-            )}
+                {/* Step markers — isolated component so that:
+                      - memo() skips re-renders when currentStepIndex doesn't change (most 60fps frames)
+                      - selection/similar changes don't re-render the slider/controls above */}
+                {stepCount > 1 && (
+                    <PlaybackStepMarkers stepCount={stepCount} maxStep={maxStep} currentStepIndex={currentStepIndex} />
+                )}
+            </div>
         </div>
     );
 };
@@ -411,9 +413,15 @@ const useStyles = makeStyles({
         minWidth: '70px',
     },
 
-    sliderRow: {
+    // Slider and step markers occupy a single row: the markers are absolutely positioned
+    // along the bottom edge of this row (rather than in a row of their own underneath it),
+    // with the row made just tall enough for both to fit without the marker chips colliding
+    // with the slider's rail/thumb above them.
+    timelineRow: {
+        position: 'relative',
         display: 'flex',
         alignItems: 'center',
+        minHeight: '40px',
         paddingLeft: tokens.spacingHorizontalXS,
         paddingRight: tokens.spacingHorizontalXS,
     },
@@ -423,15 +431,17 @@ const useStyles = makeStyles({
     },
 
     markers: {
-        position: 'relative',
-        height: '20px',
+        position: 'absolute',
+        bottom: '2px',
+        height: '14px',
         // Offset to align with the slider thumb track area (Fluent slider adds ~12px padding each side)
-        marginLeft: '14px',
-        marginRight: '14px',
+        left: '14px',
+        right: '14px',
     },
 
     marker: {
         position: 'absolute',
+        top: 0,
         transform: 'translateX(-50%)',
         padding: '0 2px',
         border: 'none',
@@ -440,7 +450,7 @@ const useStyles = makeStyles({
         color: tokens.colorNeutralForeground2,
         cursor: 'pointer',
         ...typographyStyles.caption2,
-        lineHeight: '18px',
+        lineHeight: '14px',
 
         ':hover': {
             backgroundColor: tokens.colorNeutralBackground4Hover,
