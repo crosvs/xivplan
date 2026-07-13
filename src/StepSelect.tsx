@@ -285,6 +285,7 @@ const StepPreviewImage = memo(function StepPreviewImage({ scene, stepIndex }: St
             height={PREVIEW_SIZE}
             backgroundColor="transparent"
             simple
+            pixelRatio={1}
         />
     );
 });

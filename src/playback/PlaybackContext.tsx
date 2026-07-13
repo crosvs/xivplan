@@ -64,6 +64,22 @@ export interface PlaybackDispatchValue {
     playbackTimeRef: React.RefObject<number>;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Maps a fractional playbackTime to the step that should be treated as "current"
+ * for editing/selection purposes (e.g. which step's objects are draggable/selectable).
+ *
+ * Rounds to the nearest step rather than flooring: flooring kept the previous step's
+ * objects "current" for the entire transition, so objects that only exist on the
+ * next step (e.g. ones just entering) stayed unselectable until the slider reached
+ * that step's exact integer position. Rounding switches over at the transition's
+ * midpoint instead, matching which step's objects the interpolated view is closer to.
+ */
+export function getCurrentStepIndex(playbackTime: number, maxStep: number): number {
+    return Math.min(Math.max(Math.round(playbackTime), 0), maxStep);
+}
+
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 const PlaybackContext = createContext<PlaybackContextValue | null>(null);

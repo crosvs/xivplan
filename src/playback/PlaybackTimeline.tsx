@@ -27,7 +27,7 @@ import { useIsDirty } from '../useIsDirty';
 import { useViewTransform } from '../useViewTransform';
 import { removeFileExtension } from '../util';
 import { MAX_ZOOM, MIN_ZOOM } from '../ViewTransformContext';
-import { usePlayback, usePlaybackDispatch } from './PlaybackContext';
+import { getCurrentStepIndex, usePlayback, usePlaybackDispatch } from './PlaybackContext';
 
 const ZOOM_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].filter((z) => z >= MIN_ZOOM && z <= MAX_ZOOM);
 
@@ -52,7 +52,12 @@ export const PlaybackTimeline: React.FC = () => {
 
     const stepCount = scene.steps.length;
     const maxStep = stepCount - 1;
-    const currentStepIndex = Math.min(Math.floor(playbackTime), maxStep);
+    const currentStepIndex = getCurrentStepIndex(playbackTime, maxStep);
+    // Whether the slider has actually reached the end, as opposed to just being closer to the
+    // last step than the previous one -- currentStepIndex alone can't tell these apart since it
+    // rounds to the nearest step (see getCurrentStepIndex), but "restart instead of resume" should
+    // only kick in once there's no play left to resume.
+    const atEnd = playbackTime >= maxStep;
 
     // Keep RAF loop aware of current maxStep
     useEffect(() => {
@@ -66,7 +71,7 @@ export const PlaybackTimeline: React.FC = () => {
     // Pressing Play at (or past) the last step restarts from the beginning instead of
     // being a no-op -- there's no separate "reset to start" button anymore.
     const handlePlayClick = () => {
-        if (!isPlaying && currentStepIndex >= maxStep) {
+        if (!isPlaying && atEnd) {
             setPlaybackTime(0);
         }
         togglePlay();
@@ -101,7 +106,7 @@ export const PlaybackTimeline: React.FC = () => {
             <AddStepButton size="small" />
 
             <Tooltip
-                content={!isPlaying && currentStepIndex >= maxStep ? 'Restart' : isPlaying ? 'Pause' : 'Play'}
+                content={!isPlaying && atEnd ? 'Restart' : isPlaying ? 'Pause' : 'Play'}
                 relationship="label"
                 withArrow
             >
@@ -198,8 +203,10 @@ export const PlaybackTimeline: React.FC = () => {
                 {inlineRow}
             </div>
 
-            {/* Timeline slider */}
-            <div className={classes.sliderRow}>
+            {/* Timeline slider and step markers share a single row: the markers overlay the
+                slider's rail (absolutely positioned, vertically centered on it) instead of
+                occupying a row of their own underneath it. */}
+            <div className={classes.timelineRow}>
                 <Slider
                     className={classes.slider}
                     min={0}
@@ -208,14 +215,14 @@ export const PlaybackTimeline: React.FC = () => {
                     value={playbackTime}
                     onChange={handleSliderChange}
                 />
-            </div>
 
-            {/* Step markers — isolated component so that:
-                  - memo() skips re-renders when currentStepIndex doesn't change (most 60fps frames)
-                  - selection/similar changes don't re-render the slider/controls above */}
-            {stepCount > 1 && (
-                <PlaybackStepMarkers stepCount={stepCount} maxStep={maxStep} currentStepIndex={currentStepIndex} />
-            )}
+                {/* Step markers — isolated component so that:
+                      - memo() skips re-renders when currentStepIndex doesn't change (most 60fps frames)
+                      - selection/similar changes don't re-render the slider/controls above */}
+                {stepCount > 1 && (
+                    <PlaybackStepMarkers stepCount={stepCount} maxStep={maxStep} currentStepIndex={currentStepIndex} />
+                )}
+            </div>
         </div>
     );
 };
@@ -406,9 +413,15 @@ const useStyles = makeStyles({
         minWidth: '70px',
     },
 
-    sliderRow: {
+    // Slider and step markers occupy a single row: the markers are absolutely positioned
+    // along the bottom edge of this row (rather than in a row of their own underneath it),
+    // with the row made just tall enough for both to fit without the marker chips colliding
+    // with the slider's rail/thumb above them.
+    timelineRow: {
+        position: 'relative',
         display: 'flex',
         alignItems: 'center',
+        minHeight: '40px',
         paddingLeft: tokens.spacingHorizontalXS,
         paddingRight: tokens.spacingHorizontalXS,
     },
@@ -418,15 +431,17 @@ const useStyles = makeStyles({
     },
 
     markers: {
-        position: 'relative',
-        height: '20px',
+        position: 'absolute',
+        bottom: '2px',
+        height: '14px',
         // Offset to align with the slider thumb track area (Fluent slider adds ~12px padding each side)
-        marginLeft: '14px',
-        marginRight: '14px',
+        left: '14px',
+        right: '14px',
     },
 
     marker: {
         position: 'absolute',
+        top: 0,
         transform: 'translateX(-50%)',
         padding: '0 2px',
         border: 'none',
@@ -435,7 +450,7 @@ const useStyles = makeStyles({
         color: tokens.colorNeutralForeground2,
         cursor: 'pointer',
         ...typographyStyles.caption2,
-        lineHeight: '18px',
+        lineHeight: '14px',
 
         ':hover': {
             backgroundColor: tokens.colorNeutralBackground4Hover,
