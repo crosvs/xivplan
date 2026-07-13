@@ -335,6 +335,15 @@ export interface ScenePreviewProps extends RefAttributes<Konva.Stage> {
     backgroundColor?: string;
     /** Do not draw complex objects that may slow down rendering. Useful for small previews. */
     simple?: boolean;
+    /**
+     * Caps the backing canvas resolution of each layer to this device pixel ratio instead of the
+     * browser's real one. Konva otherwise sizes every layer's canvas at `window.devicePixelRatio`
+     * regardless of how small the Stage is displayed, so a thumbnail-sized preview still rasterizes
+     * (and redraws) at full display resolution -- costly when many previews render at once, e.g. a
+     * list of per-step thumbnails. Applied via each layer's canvas as soon as the Stage mounts, so
+     * the first draw happens at the reduced resolution rather than redoing it after the fact.
+     */
+    pixelRatio?: number;
 }
 
 export const ScenePreview: React.FC<ScenePreviewProps> = ({
@@ -347,7 +356,22 @@ export const ScenePreview: React.FC<ScenePreviewProps> = ({
     height,
     backgroundColor,
     simple,
+    pixelRatio: previewPixelRatio,
 }) => {
+    const handleStageRef = useCallback(
+        (stage: Konva.Stage | null) => {
+            if (stage && previewPixelRatio) {
+                stage.getLayers().forEach((layer) => layer.getCanvas().setPixelRatio(previewPixelRatio));
+            }
+            if (typeof ref === 'function') {
+                ref(stage);
+            } else if (ref) {
+                ref.current = stage;
+            }
+        },
+        [ref, previewPixelRatio],
+    );
+
     const size = getCanvasSize(scene);
     let scale = 1;
     let x = 0;
@@ -392,7 +416,7 @@ export const ScenePreview: React.FC<ScenePreviewProps> = ({
     const spotlightContext: SelectionState = [new Set<number>(), () => {}];
 
     return (
-        <Stage ref={ref} x={x} y={y} width={width} height={height} scaleX={scale} scaleY={scale}>
+        <Stage ref={handleStageRef} x={x} y={y} width={width} height={height} scaleX={scale} scaleY={scale}>
             <DefaultCursorProvider>
                 <SceneContext value={sceneContext}>
                     <SelectionContext value={selectionContext}>
