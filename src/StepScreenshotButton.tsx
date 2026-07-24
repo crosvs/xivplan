@@ -7,6 +7,7 @@ import {
     MenuGroup,
     MenuGroupHeader,
     MenuItemRadio,
+    MenuItemSwitch,
     MenuList,
     MenuPopover,
     MenuTrigger,
@@ -38,17 +39,27 @@ export type StepScreenshotButtonProps = SplitButtonProps;
 export const StepScreenshotButton: React.FC<StepScreenshotButtonProps> = (props) => {
     const classes = useStyles();
     const { value: scale, set: setScale } = useLocalStorageValue('screenshotPixelRatio', { defaultValue: 2 });
+    const { value: transparent, set: setTransparent } = useLocalStorageValue('screenshotTransparent', {
+        defaultValue: false,
+    });
     const [takingScreenshot, setTakingScreenshot] = useState(false);
     const { dispatchToast } = useToastController();
     const cancelConnectionSelection = useCancelConnectionSelection();
 
     const checkedValues: Record<string, string[]> = {
         scale: [scale?.toString() ?? '1'],
+        transparent: transparent ? ['transparent'] : [],
     };
 
     const handleCheckedValueChanged = (e: MenuCheckedValueChangeEvent, data: MenuCheckedValueChangeData) => {
-        if (data.name === 'scale') {
-            setScale(parseInt(data.checkedItems?.[0] ?? '1'));
+        switch (data.name) {
+            case 'scale':
+                setScale(parseInt(data.checkedItems?.[0] ?? '1'));
+                break;
+
+            case 'transparent':
+                setTransparent((x) => !x);
+                break;
         }
     };
 
@@ -122,13 +133,23 @@ export const StepScreenshotButton: React.FC<StepScreenshotButtonProps> = (props)
                                 4X
                             </MenuItemRadio>
                         </MenuGroup>
+                        <MenuGroup>
+                            <MenuGroupHeader>Appearance</MenuGroupHeader>
+                            <MenuItemSwitch name="transparent" value="transparent">
+                                Transparent
+                            </MenuItemSwitch>
+                        </MenuGroup>
                     </MenuList>
                 </MenuPopover>
             </Menu>
             {takingScreenshot && (
                 <Portal mountNode={{ className: classes.screenshot }}>
                     <ObjectLoadingProvider>
-                        <ScreenshotComponent scale={scale} onScreenshotDone={handleScreenshotDone} />
+                        <ScreenshotComponent
+                            scale={scale}
+                            transparent={transparent}
+                            onScreenshotDone={handleScreenshotDone}
+                        />
                     </ObjectLoadingProvider>
                 </Portal>
             )}
@@ -146,10 +167,11 @@ const ScreenshotSuccessToast = () => {
 
 interface ScreenshotComponentProps {
     scale?: number;
+    transparent?: boolean;
     onScreenshotDone: (error?: unknown) => void;
 }
 
-const ScreenshotComponent: React.FC<ScreenshotComponentProps> = ({ scale, onScreenshotDone }) => {
+const ScreenshotComponent: React.FC<ScreenshotComponentProps> = ({ scale, transparent, onScreenshotDone }) => {
     const { isLoading } = use(ObjectLoadingContext);
     const { scene, arena, stepIndex } = useScene();
     const [frozenScene] = useState(scene);
@@ -203,6 +225,7 @@ const ScreenshotComponent: React.FC<ScreenshotComponentProps> = ({ scale, onScre
             stepIndex={frozenStepIndex}
             width={size.width}
             height={size.height}
+            backgroundColor={transparent ? 'transparent' : undefined}
         />
     );
 };
