@@ -2,6 +2,19 @@
 
 This page tracks notable changes made to XIVPlan. Not every change will be listed here.
 
+## July 23, 2026
+
+- Added modifier keys when adjusting line/cone control points:
+  - `Shift` prevents changes to the rotation of the object.
+  - `Ctrl` prevents changes to the length/radius of the object.
+  - `Alt` disables snapping to nearby 15 degree increments.
+- Reworked resizing of rectangular objects and changed the modifier keys:
+  - `Shift` to enable proportional resize now works on edge handles as well as corners.
+  - `Shift` now disables proportional resize on objects that are proportional by default.
+  - The key to resize symmetrically about the object's center changed from `Alt` to `Ctrl`.
+  - Fixed an issue where dragging a resize handle to the opposite side of the object caused its position to migrate such that it was different after returning the handle to its original position.
+- Added an option to make the screenshot padding area transparent.
+
 ## June 20, 2026
 
 - Added a way to override the arena settings for individual steps, making it easier to make plans for mechanics where the arena changes.
