@@ -22,9 +22,9 @@ import type { Scene } from '../scene';
 export const NOSTR_RELAYS = [
     'wss://nos.lol',
     'wss://nostr.mom',
-    'wss://relay.damus.io',
-    'wss://relay.primal.net',
-    'wss://relay.snort.social',
+    'wss://relay.nostr.net',
+    'wss://nostr.bitcoiner.social',
+    'wss://nostr.oxtr.dev',
 ];
 
 /**
@@ -485,8 +485,8 @@ function base64UrlToBytes(b64url: string): Uint8Array {
 // ── Compression ───────────────────────────────────────────────────────────────
 // Some public relays silently drop events over a size limit well under what a complex plan's
 // JSON serializes to (confirmed: nos.lol and nostr.mom close the connection with no error message
-// for a ~390KB event, while relay.damus.io/relay.primal.net accept it fine). Gzipping the JSON
-// before it goes into `content` buys real headroom for repetitive plan data without touching the
+// for a ~390KB event, while other configured relays accept it fine). Gzipping the JSON before it
+// goes into `content` buys real headroom for repetitive plan data without touching the
 // event/consensus model at all.
 
 /** Compression Streams API support (Chrome/Edge 80+, Firefox 113+, Safari 16.4+). */
