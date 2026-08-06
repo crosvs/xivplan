@@ -1,6 +1,6 @@
 # Final Fantasy XIV Raid Planner
 
-https://xivoid.netlify.app/
+https://xivoid.app/
 
 This is a fork of [joelspadin/xivplan](https://github.com/joelspadin/xivplan) with additional features, including a playback mode with smooth step interpolation, per-object animation controls, and video export.
 
