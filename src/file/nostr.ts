@@ -65,6 +65,22 @@ const QUERY_GRACE_MS = 2000;
 /** Outer race timeout for a single relay's publish attempt — see {@link QUERY_GRACE_MS}. */
 const PUBLISH_TIMEOUT_MS = RELAY_TIMEOUT_MS + QUERY_GRACE_MS;
 
+/**
+ * How long {@link fanGet} waits, after the *most recent* new relay information (a fresh `onevent`
+ * — the only trigger that resets this timer), before conceding without consensus rather than
+ * waiting out the full fallback ceiling below. Armed only inside the `onevent` handler, so a fetch
+ * where nothing has arrived yet is still bounded solely by the fallback timer — a slow *first*
+ * response still gets the full RELAY_TIMEOUT_MS connect+query budget every relay is entitled to.
+ * Deliberately not reset by pruning or a relay's `onclose` — neither is new *content* that could
+ * move consensus forward, and resetting on them would let a relay that keeps failing to connect
+ * (without ever answering) indefinitely postpone giving up, exactly the case this exists to bound.
+ *
+ * Trade-off: too short risks conceding 'short' while a legitimately-slower-but-healthy relay is
+ * still mid-flight; too long defeats the point. Not derived from another constant — revisit based
+ * on real-world relay latency/'short'-rate data once this ships.
+ */
+const IDLE_TIMEOUT_MS = 4000;
+
 // Single long-lived pool — connections are reused across operations.
 // Built on AbstractSimplePool rather than SimplePool because SimplePool's constructor type
 // only exposes enablePing/enableReconnect — it hardcodes maxWaitForConnection to 3000ms, which
@@ -681,7 +697,10 @@ export interface FanGetResult {
      * This call's own final per-relay labels — computed regardless of `trackUiStatus`, so a caller
      * that needs to act on them (e.g. read-repair) can use data intrinsic to *this* fetch instead of
      * re-reading the shared `_fetchStatus` store, which a concurrently-running fetch for a different
-     * plan could have already overwritten by the time the caller gets around to reading it.
+     * plan could have already overwritten by the time the caller gets around to reading it. Covers
+     * every relay passed in — including ones that never delivered a matching event ('skipped'/
+     * 'error'), not just ones that answered — so a caller can't be missing exactly the relays it
+     * would need to target.
      */
     relayStatuses: Map<string, RelayHealth>;
     /**
@@ -761,6 +780,7 @@ async function fanGet(
         const active = new Set(relays);
         const prunedRelays = new Set<string>();
         let resolved = false;
+        let idleHandle: ReturnType<typeof setTimeout> | undefined;
 
         function threshold(): number {
             return consensusThreshold(relays.length - prunedRelays.size);
@@ -788,15 +808,22 @@ async function fanGet(
             return labels;
         }
 
-        // Once the fetch concludes, every relay still 'checking' gets a terminal status: 'skipped'
-        // if we stopped listening because consensus was already reached elsewhere (not a failure),
-        // or 'error' if we simply ran out of patience without ever hearing from it. Pruned relays
-        // already got their own (equally non-failure) 'skipped' status when they were pruned.
+        // The terminal status for a relay that never delivered a matching event by the time the
+        // fetch concluded: 'skipped' if we stopped listening because consensus was already reached
+        // elsewhere (not a failure) or the relay was pruned as too small, or 'error' if we simply
+        // ran out of patience without ever hearing from it. Shared by settleStragglers (the
+        // mutable, UI-facing _fetchStatus store) and finish (this call's own returned
+        // relayStatuses) so the two can never disagree about which relays count as a genuine
+        // failure vs. a benign "we didn't need you."
+        function terminalLabelFor(relay: string, outcome: 'consensus' | 'timeout'): 'skipped' | 'error' {
+            return prunedRelays.has(relay) || outcome === 'consensus' ? 'skipped' : 'error';
+        }
+
         function settleStragglers(outcome: 'consensus' | 'timeout'): void {
             if (!uiActive()) return;
             for (const relay of relays) {
                 if (_fetchStatus.get(relay) === 'checking') {
-                    _setFetchStatus(relay, outcome === 'consensus' ? 'skipped' : 'error');
+                    _setFetchStatus(relay, terminalLabelFor(relay, outcome));
                 }
             }
         }
@@ -817,14 +844,23 @@ async function fanGet(
             if (resolved) return;
             resolved = true;
             clearTimeout(fallbackHandle);
+            clearTimeout(idleHandle);
             settleStragglers(outcome);
             updateRelayLabels();
             if (uiActive()) _fetchProgress.finish(outcome === 'consensus' ? 'reached' : 'short', agreeingRelays);
+            // relayLabels(best) only covers relays that delivered some event — backfill every relay
+            // we never heard a matching event from (skipped once consensus/pruning ended the wait, or
+            // errored out empty-handed) so callers like read-repair see a complete picture instead of
+            // silently missing exactly the relays they'd need to target.
+            const relayStatuses = relayLabels(best);
+            for (const relay of relays) {
+                if (!relayStatuses.has(relay)) relayStatuses.set(relay, terminalLabelFor(relay, outcome));
+            }
             resolve({
                 event: best,
                 agreeingRelays,
                 totalRelays: relays.length - prunedRelays.size,
-                relayStatuses: relayLabels(best),
+                relayStatuses,
                 relayEvents: best ? (relaysByKey.get(groupKey(best)) ?? new Map()) : new Map(),
                 uiGeneration: myGeneration,
             });
@@ -868,12 +904,29 @@ async function fanGet(
 
         registerPruner?.(pruneRelay);
 
-        // No consensus reached — fall back to whatever the best response was once every relay
-        // has had its full connect+query budget (mirrors the previous wait-for-all behavior).
-        const fallbackHandle = setTimeout(() => {
+        // Concedes without consensus, resolving with whatever's currently in hand. Shared by the
+        // absolute fallback timer below and the idle timer armed from `onevent` — the only
+        // difference between the two is how soon each can fire; the resolution behavior is
+        // identical either way.
+        function giveUp(): void {
             const best = bestSoFar();
             finish(best, best ? (relaysByKey.get(groupKey(best))?.size ?? 0) : 0, 'timeout');
-        }, fallbackTimeoutMs);
+        }
+
+        // Re-arms the idle timer (see IDLE_TIMEOUT_MS) to fire from *now*. Guarded by `resolved` in
+        // case the same event's own checkConsensus() call (invoked after this) already resolved —
+        // not unsafe either way since `finish` is itself guarded, just avoids scheduling pointless
+        // work on an already-decided call.
+        function armIdleTimer(): void {
+            if (resolved) return;
+            clearTimeout(idleHandle);
+            idleHandle = setTimeout(giveUp, IDLE_TIMEOUT_MS);
+        }
+
+        // No consensus reached — fall back to whatever the best response was once every relay
+        // has had its full connect+query budget (mirrors the previous wait-for-all behavior). The
+        // hard ceiling: unaffected by anything that resets the idle timer above.
+        const fallbackHandle = setTimeout(giveUp, fallbackTimeoutMs);
 
         if (uiActive()) {
             _resetFetchStatus(relays);
@@ -886,6 +939,7 @@ async function fanGet(
                 _pool.subscribeMany([relay], filter, {
                     maxWait: RELAY_TIMEOUT_MS,
                     onevent: (event) => {
+                        armIdleTimer();
                         active.delete(relay);
                         if (uiActive()) _setFetchStatus(relay, 'connected');
                         const key = groupKey(event);
@@ -1448,6 +1502,36 @@ async function fetchPlanData(
 const REPAIR_MIN_AGREEMENT = 2;
 
 /**
+ * Session-lifetime cooldown gate on *speculative* repair — pushing to a relay we have zero
+ * evidence about ('skipped': we stopped listening once consensus was reached elsewhere; 'error':
+ * it never answered in time). Keyed by relay URL only, never by planId — an unreachable/slow relay
+ * is unreachable regardless of which plan is being fetched, so gating per-plan would let one
+ * vault-browsing session re-attempt the same relay once per plan opened. Trade-off accepted: a
+ * different plan with its own independent >=REPAIR_MIN_AGREEMENT evidence still has to wait out
+ * this relay's cooldown too — acceptable since this is opportunistic housekeeping, not something
+ * any plan's fetch depends on. Mirrors the {@link probeRelays}/`PROBE_COOLDOWN_MS` idiom, but needs
+ * its own per-relay map rather than a single timestamp, since relays fail/recover independently.
+ */
+const _speculativeRepairAttempted = new Map<string, number>();
+
+/** How long a relay stays exempt from speculative repair after an attempt (success or not) — see
+ *  {@link _speculativeRepairAttempted}. Much longer than `PROBE_COOLDOWN_MS`: that's a cheap
+ *  read-only probe, this is a real publish attempt against a relay we have no confirmation is even
+ *  reachable, so aggressively retrying mostly just re-pays the ladder's cost for nothing. */
+const SPECULATIVE_REPAIR_COOLDOWN_MS = 30 * 60 * 1000;
+
+/** True (and starts `relay`'s cooldown) the first time this is called for it since the cooldown
+ *  last expired — false on every call within the window. Marks synchronously, before the async
+ *  publish starts, so two fetches racing for the same never-responded-to relay can't both slip
+ *  through before either records the attempt. */
+function tryClaimSpeculativeRepair(relay: string): boolean {
+    const now = Date.now();
+    if (now - (_speculativeRepairAttempted.get(relay) ?? 0) < SPECULATIVE_REPAIR_COOLDOWN_MS) return false;
+    _speculativeRepairAttempted.set(relay, now);
+    return true;
+}
+
+/**
  * One relay's repair attempt, two-tier. Tier 1 (always available, any plan whether owned or not):
  * verbatim-republish the exact chunk set we reconstructed from — same ids/sigs/content, zero
  * re-signing, so a stale version can never outrank a genuinely newer one we simply haven't seen yet
@@ -1466,6 +1550,10 @@ async function repairOneRelay(
     sharedTags: string[][],
     content: string,
     chunks: NostrEvent[],
+    // False for speculative targets (see repairStaleRelays) — restricts them to the always-safe
+    // tier 1 verbatim republish, withholding tier 2's signing/ladder cost from relays we have zero
+    // confirmation are even reachable.
+    allowRechunk = true,
 ): Promise<void> {
     // Skip the doomed verbatim attempt outright if we already know this relay can't hold even the
     // largest piece we're holding — but still give tier 2 (below) a chance to chunk further down.
@@ -1475,7 +1563,7 @@ async function repairOneRelay(
         maxLen !== undefined && maxChunkSize > maxLen
             ? { ok: false, sizeRejected: true }
             : await tryPublishSet(relay, chunks);
-    if (verbatim.ok || !verbatim.sizeRejected || !sk) return;
+    if (verbatim.ok || !verbatim.sizeRejected || !sk || !allowRechunk) return;
     const wholeEvent = buildWholeEvent(sk, planId, createdAt, gen, sharedTags, content);
     await publishDataToRelay(relay, sk, planId, createdAt, gen, sharedTags, content, wholeEvent);
 }
@@ -1484,14 +1572,22 @@ async function repairOneRelay(
  * Read repair: fire-and-forget republish of a fetch's winning chunk set to every relay that's
  * *confirmed* behind — one we actually heard back from with a different (older) version ('stale'),
  * or the right version but an incomplete chunk set ('incomplete') — self-healing relays that missed
- * an update, got pruned, or came back online with outdated/partial data. Deliberately excludes
- * 'skipped'/'error' relays: we have no evidence at all about what they currently hold (we either
- * never heard from them, or gave up before they answered) — pushing to them assumes they're behind,
- * but they could just as easily be sitting on a genuinely newer version we simply failed to fetch in
- * time, and relying on every relay to correctly discard an incoming write that's older than what it
- * already has isn't a safe assumption to build on. Never awaited by the caller and never throws;
- * this is opportunistic housekeeping, not something the user asked for, so a failed repair attempt
- * should be invisible.
+ * an update, got pruned, or came back online with outdated/partial data. Never awaited by the
+ * caller and never throws; this is opportunistic housekeeping, not something the user asked for, so
+ * a failed repair attempt should be invisible.
+ *
+ * Also, separately, cooldown-gated speculative repair for 'skipped'/'error' relays — ones we have
+ * *no* evidence about, because we either never heard from them or gave up before they answered.
+ * These were originally excluded outright: pushing to them assumes they're behind, but they could
+ * just as easily be sitting on a genuinely newer version we simply failed to fetch in time. That
+ * risk turns out to already be accepted by the confirmed-target repair above — tier 1's verbatim
+ * republish reuses the fetch's winning `created_at` exactly, so on a relay that correctly follows
+ * NIP-01/33 (every relay in NOSTR_RELAYS does), it can never outrank something genuinely newer; the
+ * worst case is a no-op. So the only reason to keep excluding 'skipped'/'error' isn't safety, it's
+ * that we're now guessing rather than confirmed — {@link tryClaimSpeculativeRepair}'s cooldown
+ * bounds how often that guess gets acted on, and `allowRechunk: false` below keeps it to the
+ * always-safe tier 1 verbatim republish, withholding tier 2's signing/ladder cost from relays we
+ * have zero confirmation are even reachable.
  *
  * `sk` is the *plan owner's* secret key, or null if the current session doesn't hold it (repairing
  * someone else's public plan) — gates tier 2 above, since re-chunking requires signing new events as
@@ -1513,11 +1609,20 @@ function repairStaleRelays(
     relayStatuses: Map<string, RelayHealth>,
 ): void {
     if (agreeingRelays < REPAIR_MIN_AGREEMENT) return;
-    const targets = [...relayStatuses]
+
+    const confirmedTargets = [...relayStatuses]
         .filter(([, status]) => status === 'stale' || status === 'incomplete')
         .map(([url]) => url);
-    for (const relay of targets) {
+    for (const relay of confirmedTargets) {
         void repairOneRelay(relay, sk, planId, createdAt, gen, sharedTags, content, chunks);
+    }
+
+    const speculativeTargets = [...relayStatuses]
+        .filter(([, status]) => status === 'skipped' || status === 'error')
+        .map(([url]) => url)
+        .filter(tryClaimSpeculativeRepair);
+    for (const relay of speculativeTargets) {
+        void repairOneRelay(relay, sk, planId, createdAt, gen, sharedTags, content, chunks, false);
     }
 }
 
