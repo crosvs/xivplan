@@ -1,20 +1,19 @@
 import Konva from 'konva';
-import { CircleConfig } from 'konva/lib/shapes/Circle';
+import type { CircleConfig } from 'konva/lib/shapes/Circle';
 import React, { useRef } from 'react';
 import { Circle, Group } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
+import { registerDropHandler } from '../../DropHandler';
 import { useScene } from '../../SceneProvider';
 import Icon from '../../assets/zone/stack.svg?react';
 import { getCanvasCoord } from '../../coord';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { ForegroundPortal } from '../../render/Portals';
 import { LayerName } from '../../render/layers';
-import { ObjectType, StackZone } from '../../scene';
+import { ObjectType, type StackZone } from '../../scene';
 import { DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
 import { useKonvaCache } from '../../useKonvaCache';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { RadiusObjectContainer } from '../RadiusObjectContainer';
@@ -29,20 +28,12 @@ const NAME = 'Stack';
 const DEFAULT_RADIUS = 75;
 
 export const ZoneStack: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-
     return (
         <PrefabIcon
-            draggable
             name={NAME}
             icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Stack,
-                    },
-                    offset: getDragOffset(e),
-                });
+            object={{
+                type: ObjectType.Stack,
             }}
         />
     );
@@ -75,10 +66,10 @@ const StackRenderer: React.FC<StackRendererProps> = ({ object, radius }) => {
     const ring = getZoneStyle(object.color, object.opacity, radius * 2);
     const arrow = getArrowStyle(object.color, object.opacity * 2);
 
-    const cx = radius * 0.6;
-    const cw = radius * 0.5;
-    const ch = radius * 0.325;
-    const ca = 40;
+    const outerChevronOffset = radius * 0.6;
+    const chevronWidth = radius * 0.5;
+    const chevronThickness = radius * 0.165;
+    const chevronAngle = 40;
 
     const showOrbs = !object.hide && object.count > 1;
 
@@ -88,15 +79,22 @@ const StackRenderer: React.FC<StackRendererProps> = ({ object, radius }) => {
 
             <HideGroup {...overrideProps}>
                 <Circle radius={radius} {...ring} opacity={0.75} fill="transparent" />
+                {object.multiHit && (
+                    <>
+                        <Circle radius={radius * 0.85} {...ring} opacity={0.55} fill="transparent" />
+                        <Circle radius={radius * 0.7} {...ring} opacity={0.35} fill="transparent" />
+                    </>
+                )}
 
                 {object.count === 1 && (
                     <ChevronTail
                         rotation={180}
-                        chevronAngle={ca}
-                        width={cw * 0.6}
-                        height={ch * 0.6}
+                        chevronAngle={chevronAngle}
+                        width={chevronWidth * 0.6}
+                        thickness={chevronThickness * 0.6}
                         {...arrow}
                         listening={false}
+                        doubleChevron={object.multiHit}
                     />
                 )}
                 {showOrbs && <StackOrbs object={object} radius={radius} ring={ring} orb={arrow} />}
@@ -104,12 +102,13 @@ const StackRenderer: React.FC<StackRendererProps> = ({ object, radius }) => {
                 {CHEVRON_ANGLES.map((r, i) => (
                     <ChevronTail
                         key={i}
-                        offsetY={-cx}
+                        offsetY={-outerChevronOffset}
                         rotation={r}
-                        chevronAngle={ca}
-                        width={cw}
-                        height={ch}
+                        chevronAngle={chevronAngle}
+                        width={chevronWidth}
+                        thickness={chevronThickness}
                         {...arrow}
+                        doubleChevron={object.multiHit}
                     />
                 ))}
             </HideGroup>
@@ -123,8 +122,8 @@ interface StackOrbsProps extends StackRendererProps {
 }
 
 const StackOrbs: React.FC<StackOrbsProps> = ({ object, radius, ring }) => {
-    const { scene } = useScene();
-    const center = getCanvasCoord(scene, object);
+    const { scene, arena } = useScene();
+    const center = getCanvasCoord(scene, arena, object);
 
     const orbRadius = Math.min(radius * 0.25, 40);
     const orbs = getStackCircleProps(orbRadius, object.count);

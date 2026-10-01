@@ -1,7 +1,7 @@
 import {
     Field,
     ToggleButton,
-    ToggleButtonProps,
+    type ToggleButtonProps,
     makeStyles,
     mergeClasses,
     shorthands,
@@ -16,12 +16,11 @@ import {
 } from '@fluentui/react-icons';
 import React from 'react';
 import { BrushSizeControl } from '../BrushSizeControl';
-import { CompactColorPicker, CompactColorPickerProps } from '../CompactColorPicker';
+import { CompactColorPicker, type CompactColorPickerProps } from '../CompactColorPicker';
 import { CompactSwatchColorPicker } from '../CompactSwatchColorPicker';
-import { OpacitySlider } from '../OpacitySlider';
+import { SliderField } from '../SliderField';
 import { EditMode } from '../editMode';
 import '../prefabs/DrawObjectRenderer';
-import { useSpinChanged } from '../prefabs/useSpinChanged';
 import { useColorSwatches } from '../theme';
 import { useControlStyles } from '../useControlStyles';
 import { useDrawConfig } from '../useDrawConfig';
@@ -48,7 +47,7 @@ export const DrawPanel: React.FC = () => {
         }
     };
 
-    const onSizeChanged = useSpinChanged((brushSize: number) => setConfig({ ...config, brushSize }));
+    const onSizeChanged = (brushSize: number) => setConfig({ ...config, brushSize });
 
     const modeHotkey = (mode: EditMode) => (e: KeyboardEvent) => {
         setEditMode(mode);
@@ -85,12 +84,19 @@ export const DrawPanel: React.FC = () => {
                 selectedValue={config.color}
                 onSelectionChange={(ev, data) => setColor({ value: data.selectedSwatch, transient: false })}
             />
-            <OpacitySlider value={config.opacity} onChange={(ev, data) => setOpacity(data.value)} />
+            <SliderField
+                label="Opacity"
+                min={5}
+                step={5}
+                value={config.opacity}
+                showValue
+                onChange={(ev, data) => setOpacity(data.value)}
+            />
             <BrushSizeControl
                 value={config.brushSize}
                 color={config.color}
                 opacity={config.opacity}
-                onChange={onSizeChanged}
+                onValueChange={onSizeChanged}
             />
         </div>
     );

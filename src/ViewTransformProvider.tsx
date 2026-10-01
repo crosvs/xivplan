@@ -1,5 +1,5 @@
-import React, { PropsWithChildren, useState } from 'react';
-import { DEFAULT_VIEW_TRANSFORM, ViewTransform, ViewTransformContext } from './ViewTransformContext';
+import React, { type PropsWithChildren, useState } from 'react';
+import { DEFAULT_VIEW_TRANSFORM, type ViewTransform, ViewTransformContext } from './ViewTransformContext';
 
 export const ViewTransformProvider: React.FC<PropsWithChildren> = ({ children }) => {
     const state = useState<ViewTransform>(DEFAULT_VIEW_TRANSFORM);

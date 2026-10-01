@@ -1,4 +1,4 @@
-import { DBSchema, openDB } from 'idb';
+import { type DBSchema, openDB } from 'idb';
 
 export async function getRevealedArenaPresets(): Promise<string[]> {
     const db = await getDatabase();
@@ -26,7 +26,7 @@ const db = openDB<Schema>('xivplan-spoilers', CURRENT_VERSION, {
     upgrade(db, oldVersion, newVersion) {
         if (oldVersion > CURRENT_VERSION) {
             console.warn(
-                `Spoilers satabase version downgrade from ${oldVersion} to ${newVersion}. Resetting database.`,
+                `Spoilers database version downgrade from ${oldVersion} to ${newVersion}. Resetting database.`,
             );
             db.deleteObjectStore('arenaPresets');
         }

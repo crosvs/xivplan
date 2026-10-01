@@ -1,11 +1,11 @@
 import { Stage } from 'konva/lib/Stage';
-import { Vector2d } from 'konva/lib/types';
-import React, { Dispatch, SetStateAction, useContext, useState } from 'react';
-import { HotkeyCallback } from 'react-hotkeys-hook';
+import type { Vector2d } from 'konva/lib/types';
+import React, { type Dispatch, type SetStateAction, use, useState } from 'react';
+import type { HotkeyCallback } from 'react-hotkeys-hook';
 import { HelpContext } from './HelpContext';
 import { HelpDialog } from './HelpDialog';
-import { GroupMoveAction, SceneAction, useScene } from './SceneProvider';
-import { SceneSelection } from './SelectionContext';
+import { type GroupMoveAction, type SceneAction, useScene } from './SceneProvider';
+import type { SceneSelection } from './SelectionContext';
 import { omitInterconnectedObjects } from './connections';
 import { getAbsolutePosition, getSceneCoord, makeRelative, rotateCoord } from './coord';
 import { copyObjects, getGroupCenter } from './copy';
@@ -13,7 +13,16 @@ import { EditMode } from './editMode';
 import { moveObjectsBy } from './groupOperations';
 import { makeTethers } from './prefabs/TetherConfig';
 import { useStage } from './render/stage';
-import { MoveableObject, Scene, SceneObject, SceneStep, TetherType, isMoveable, isRotateable } from './scene';
+import {
+    type Arena,
+    type MoveableObject,
+    type Scene,
+    type SceneObject,
+    type SceneStep,
+    TetherType,
+    isMoveable,
+    isRotateable,
+} from './scene';
 import {
     getSelectedObjects,
     selectAll,
@@ -51,9 +60,14 @@ const UndoRedoHandler: React.FC = () => {
         e.preventDefault();
     };
 
-    useHotkeys('ctrl+z', { category: CATEGORY_HISTORY, help: 'Undo' }, undoCallback);
-    useHotkeys('ctrl+y', { category: CATEGORY_HISTORY, help: 'Redo' }, redoCallback);
-    useHotkeys('ctrl+shift+z', { category: CATEGORY_HISTORY, help: 'Redo' }, redoCallback);
+    // Hotkeys are ignored while a form control has focus, so native undo in text fields keeps working. Sliders
+    // that opt in with an explicit role="slider" (e.g. the playback timeline) have no undo of their own, so let
+    // undo/redo through there rather than making the user click away first.
+    const historyOptions = { enableOnFormTags: ['slider'] } as const;
+
+    useHotkeys('ctrl+z', { category: CATEGORY_HISTORY, help: 'Undo' }, undoCallback, historyOptions);
+    useHotkeys('ctrl+y', { category: CATEGORY_HISTORY, help: 'Redo' }, redoCallback, historyOptions);
+    useHotkeys('ctrl+shift+z', { category: CATEGORY_HISTORY, help: 'Redo' }, redoCallback, historyOptions);
 
     return null;
 };
@@ -61,14 +75,19 @@ const UndoRedoHandler: React.FC = () => {
 function pasteObjects(
     stage: Stage,
     scene: Scene,
+    arena: Arena,
     step: SceneStep,
     dispatch: Dispatch<SceneAction>,
     setSelection: Dispatch<SetStateAction<SceneSelection>>,
     objects: readonly SceneObject[],
     centerOnMouse = true,
 ): void {
+    if (objects.length === 0) {
+        return;
+    }
+
     const pointerPosition = stage.getRelativePointerPosition() ?? { x: 0, y: 0 };
-    const newCenter = centerOnMouse ? getSceneCoord(scene, pointerPosition) : undefined;
+    const newCenter = centerOnMouse ? getSceneCoord(scene, arena, pointerPosition) : undefined;
 
     const { objects: newObjects } = copyObjects(scene, step, objects, newCenter);
 
@@ -95,13 +114,56 @@ function toggleLock(objects: readonly SceneObject[], dispatch: Dispatch<SceneAct
     dispatch({ type: 'update', value: moveable.map((obj) => setOrOmit(obj, 'pinned', newValue)) });
 }
 
+const CLIPBOARD_MIME_TYPE = 'web application/vnd.xivplan+json';
+
+async function setClipboard(
+    step: SceneStep,
+    selection: SceneSelection,
+    setClipboardFallback: Dispatch<SetStateAction<readonly SceneObject[]>>,
+) {
+    const objects = getSelectedObjects(step, selection);
+
+    if (!ClipboardItem.supports(CLIPBOARD_MIME_TYPE)) {
+        setClipboardFallback(objects);
+        return;
+    }
+
+    const item = new ClipboardItem({
+        [CLIPBOARD_MIME_TYPE]: JSON.stringify(objects),
+    });
+    await navigator.clipboard.write([item]);
+}
+
+async function getClipboard(clipboardFallback: readonly SceneObject[]): Promise<readonly SceneObject[]> {
+    if (!ClipboardItem.supports(CLIPBOARD_MIME_TYPE)) {
+        return clipboardFallback;
+    }
+
+    const items = await navigator.clipboard.read();
+    const item = items.find((item) => item.types.includes(CLIPBOARD_MIME_TYPE));
+
+    if (!item) {
+        return [];
+    }
+
+    const blob = await item.getType(CLIPBOARD_MIME_TYPE);
+    const json = await blob.text();
+    const objects = JSON.parse(json);
+
+    if (!Array.isArray(objects)) {
+        return [];
+    }
+
+    return objects as SceneObject[];
+}
+
 const SelectionActionHandler: React.FC = () => {
-    const [clipboard, setClipboard] = useState<readonly SceneObject[]>([]);
+    const [clipboardFallback, setClipboardFallback] = useState<readonly SceneObject[]>([]);
     const [selection, setSelection] = useSelection();
     const [editMode, setEditMode] = useEditMode();
     const [previewMode] = usePreviewMode();
     const [tetherConfig, setTetherConfig] = useTetherConfig();
-    const { scene, step, dispatch } = useScene();
+    const { scene, step, arena, dispatch } = useScene();
     const stage = useStage();
     const { selection: crossStep, setSelection: setCrossStep } = useCrossStepSelection();
 
@@ -161,54 +223,62 @@ const SelectionActionHandler: React.FC = () => {
     useHotkeys(
         'ctrl+c',
         { category: CATEGORY_SELECTION, help: 'Copy selected objects' },
-        (e) => {
+        async (e) => {
             if (!selection.size || editMode !== EditMode.Normal) {
                 return;
             }
-            setClipboard(getSelectedObjects(step, selection));
+
             e.preventDefault();
+            await setClipboard(step, selection, setClipboardFallback);
         },
-        [step, selection, editMode],
+        [step, selection, editMode, setClipboardFallback],
     );
     useHotkeys(
         'ctrl+x',
         { category: CATEGORY_SELECTION, help: 'Cut selected objects' },
-        (e) => {
+        async (e) => {
             if (!selection.size || editMode !== EditMode.Normal || previewMode) {
                 return;
             }
-            setClipboard(getSelectedObjects(step, selection));
+            e.preventDefault();
+
             dispatch({ type: 'remove', ids: [...selection] });
             setSelection(selectNone());
             if (crossStep.size) setCrossStep(new Map());
-            e.preventDefault();
+
+            await setClipboard(step, selection, setClipboardFallback);
         },
-        [step, dispatch, setSelection, selection, crossStep, setCrossStep, editMode, previewMode],
+        [step, dispatch, setSelection, selection, crossStep, setCrossStep, editMode, previewMode, setClipboardFallback],
     );
     useHotkeys(
         'ctrl+v',
         { category: CATEGORY_SELECTION, help: 'Paste objects at mouse' },
-        (e) => {
-            if (!clipboard.length || !stage || editMode !== EditMode.Normal || previewMode) {
+        async (e) => {
+            if (!stage || editMode !== EditMode.Normal || previewMode) {
                 return;
             }
-            pasteObjects(stage, scene, step, dispatch, setSelection, clipboard);
+
             e.preventDefault();
+
+            const clipboard = await getClipboard(clipboardFallback);
+            pasteObjects(stage, scene, arena, step, dispatch, setSelection, clipboard);
         },
-        [stage, scene, step, dispatch, setSelection, clipboard, editMode, previewMode],
+        [stage, scene, step, dispatch, setSelection, editMode, previewMode, clipboardFallback],
     );
 
     useHotkeys(
         'ctrl+shift+v',
         { category: CATEGORY_SELECTION, help: 'Paste objects at original location' },
-        (e) => {
-            if (!clipboard.length || !stage || editMode !== EditMode.Normal || previewMode) {
+        async (e) => {
+            if (!stage || editMode !== EditMode.Normal || previewMode) {
                 return;
             }
-            pasteObjects(stage, scene, step, dispatch, setSelection, clipboard, false);
             e.preventDefault();
+
+            const clipboard = await getClipboard(clipboardFallback);
+            pasteObjects(stage, scene, arena, step, dispatch, setSelection, clipboard, false);
         },
-        [stage, scene, step, dispatch, setSelection, clipboard, editMode, previewMode],
+        [stage, scene, step, dispatch, setSelection, editMode, previewMode, clipboardFallback],
     );
 
     useHotkeys(
@@ -218,7 +288,7 @@ const SelectionActionHandler: React.FC = () => {
             if (!selection.size || !stage || editMode !== EditMode.Normal || previewMode) {
                 return;
             }
-            pasteObjects(stage, scene, step, dispatch, setSelection, getSelectedObjects(step, selection), false);
+            pasteObjects(stage, scene, arena, step, dispatch, setSelection, getSelectedObjects(step, selection), false);
             e.preventDefault();
         },
         [stage, scene, step, dispatch, selection, setSelection, editMode, previewMode],
@@ -422,7 +492,6 @@ const EditActionHandler: React.FC = () => {
             return;
         }
 
-        const value: SceneObject[] = [];
         const selectedObjects = getSelectedObjects(step, selection)
             .filter(isMoveable)
             // TODO: figure out the expected behavior of rotating a selection of >1 items that includes
@@ -430,11 +499,10 @@ const EditActionHandler: React.FC = () => {
             .filter((obj) => selection.size == 1 || obj.positionParentId == undefined);
         const center = getGroupCenter(scene, selectedObjects);
 
-        selectedObjects.forEach((object) => {
-            value.push(rotateObject(scene, object, center, offset));
+        dispatch({
+            type: 'update',
+            value: selectedObjects.map((obj) => rotateObject(scene, obj, center, offset)),
         });
-
-        dispatch({ type: 'update', value });
         e.preventDefault();
     };
 
@@ -469,7 +537,7 @@ const EditActionHandler: React.FC = () => {
 };
 
 const HelpHandler: React.FC = () => {
-    const [open, setOpen] = useContext(HelpContext);
+    const [open, setOpen] = use(HelpContext);
 
     useHotkeys(
         'f1',

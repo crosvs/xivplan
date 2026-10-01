@@ -1,6 +1,6 @@
 import React from 'react';
 import { Group, RegularPolygon } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
+import { registerDropHandler } from '../../DropHandler';
 import HexagonIcon from '../../assets/zone/hexagon.svg?react';
 import OcatgonIcon from '../../assets/zone/octagon.svg?react';
 import PentagonIcon from '../../assets/zone/pentagon.svg?react';
@@ -8,12 +8,11 @@ import SeptagonIcon from '../../assets/zone/septagon.svg?react';
 import SquareIcon from '../../assets/zone/square.svg?react';
 import TriangleIcon from '../../assets/zone/triangle.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { ObjectType, PolygonZone } from '../../scene';
+import { ObjectType, type PolygonZone } from '../../scene';
 import { DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { RadiusObjectContainer } from '../RadiusObjectContainer';
@@ -26,19 +25,12 @@ const DEFAULT_RADIUS = 50;
 const DEFAULT_SIDES = 6;
 
 export const ZonePolygon: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
     return (
         <PrefabIcon
-            draggable
             name={NAME}
             icon={<HexagonIcon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Polygon,
-                    },
-                    offset: getDragOffset(e),
-                });
+            object={{
+                type: ObjectType.Polygon,
             }}
         />
     );

@@ -1,27 +1,34 @@
-import { WedgeConfig } from 'konva/lib/shapes/Wedge';
+import type { WedgeConfig } from 'konva/lib/shapes/Wedge';
 import React, { useState } from 'react';
 import { Group, Shape, Wedge } from 'react-konva';
 import { getDragOffset, registerDropHandler } from '../../DropHandler';
 import { useScene } from '../../SceneProvider';
 import Icon from '../../assets/zone/cone.svg?react';
-import { getAbsoluteRotation, getBaseFacingRotation, getPointerAngle, snapAngle } from '../../coord';
+import { getAbsoluteRotation, getBaseFacingRotation } from '../../coord';
 import { getResizeCursor } from '../../cursor';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { RendererProps, registerRenderer } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { type RendererProps, registerRenderer } from '../../render/ObjectRegistry';
 import { ActivePortal } from '../../render/Portals';
 import { LayerName } from '../../render/layers';
-import { ConeZone, ObjectType, Scene } from '../../scene';
+import { type ConeZone, ObjectType, type Scene } from '../../scene';
 import { useIsDragging } from '../../selection';
 import { DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
-import { clamp, clampRotation, degtorad, mod360 } from '../../util';
+import { type Enum, clampRotation, degtorad, mod360 } from '../../util';
 import { distance } from '../../vector';
-import { CONTROL_POINT_BORDER_COLOR, HandleFuncProps, HandleStyle, createControlPointManager } from '../ControlPoint';
+import { type ControlledObjectStateBase, createControlPointManager } from '../ControlPoint';
 import { DraggableObject } from '../DraggableObject';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
-import { MAX_CONE_ANGLE, MIN_CONE_ANGLE, MIN_RADIUS } from '../bounds';
+import { MIN_RADIUS } from '../bounds';
+import {
+    AngleHandleType,
+    CONTROL_POINT_BORDER_COLOR,
+    type HandleFuncProps,
+    HandleStyle,
+    getNewConeAngleFromPointer,
+    getNewRotationFromPointer,
+} from '../controlpoints';
 import { useHighlightProps, useOverrideProps, useShowResizer } from '../highlight';
 import { getZoneStyle } from './style';
 
@@ -33,24 +40,19 @@ const DEFAULT_ANGLE = 90;
 const ICON_SIZE = 32;
 
 export const ZoneCone: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-
     return (
         <PrefabIcon
-            draggable
             name={NAME}
             icon={<Icon />}
-            onDragStart={(e) => {
+            object={{
+                type: ObjectType.Cone,
+            }}
+            getOffset={(e) => {
                 const offset = getDragOffset(e);
-                setDragObject({
-                    object: {
-                        type: ObjectType.Cone,
-                    },
-                    offset: {
-                        x: offset.x,
-                        y: offset.y - ICON_SIZE / 2,
-                    },
-                });
+                return {
+                    x: offset.x,
+                    y: offset.y - ICON_SIZE / 2,
+                };
             }}
         />
     );
@@ -202,13 +204,14 @@ const ConeDetails: React.FC<ListComponentProps<ConeZone>> = ({ object, ...props 
 
 registerListComponent<ConeZone>(ObjectType.Cone, ConeDetails);
 
-enum HandleId {
-    Radius,
-    Angle1,
-    Angle2,
-}
+const HandleId = {
+    Radius: 0,
+    Angle1: 1,
+    Angle2: 2,
+} as const;
+type HandleId = Enum<typeof HandleId>;
 
-interface ConeState {
+interface ConeState extends ControlledObjectStateBase {
     radius: number;
     rotation: number;
     coneAngle: number;
@@ -216,48 +219,43 @@ interface ConeState {
 
 const OUTSET = 2;
 
-const ROTATE_SNAP_DIVISION = 15;
-const ROTATE_SNAP_TOLERANCE = 2;
-
-function getRadius(object: ConeZone, { pointerPos, activeHandleId }: HandleFuncProps) {
-    if (pointerPos && activeHandleId === HandleId.Radius) {
+function getRadius(object: ConeZone, { pointerPos, activeHandleId, modifierKeys }: HandleFuncProps) {
+    if (pointerPos && activeHandleId === HandleId.Radius && !modifierKeys?.ctrlKey) {
         return Math.max(MIN_RADIUS, Math.round(distance(pointerPos) - OUTSET));
     }
 
     return object.radius;
 }
 
-function getRotation(scene: Readonly<Scene>, object: ConeZone, { pointerPos, activeHandleId }: HandleFuncProps) {
-    if (pointerPos && activeHandleId === HandleId.Radius) {
-        const angle = getPointerAngle(pointerPos);
-        const baseRotation = getBaseFacingRotation(scene, object);
-        return snapAngle(angle - baseRotation, ROTATE_SNAP_DIVISION, ROTATE_SNAP_TOLERANCE) + baseRotation;
+function getRotation(
+    scene: Readonly<Scene>,
+    object: ConeZone,
+    { pointerPos, activeHandleId, modifierKeys }: HandleFuncProps,
+) {
+    if (pointerPos && activeHandleId === HandleId.Radius && !modifierKeys?.shiftKey) {
+        return getNewRotationFromPointer(scene, object, pointerPos, modifierKeys);
     }
 
     return getAbsoluteRotation(scene, object);
 }
 
-function getConeAngle(scene: Readonly<Scene>, object: ConeZone, { pointerPos, activeHandleId }: HandleFuncProps) {
+function getConeAngle(
+    scene: Readonly<Scene>,
+    object: ConeZone,
+    { pointerPos, activeHandleId, modifierKeys }: HandleFuncProps,
+) {
     if (pointerPos) {
-        const objectRotation = getAbsoluteRotation(scene, object);
-        const angle = getPointerAngle(pointerPos);
-
         if (activeHandleId === HandleId.Angle1) {
-            const coneAngle = snapAngle(
-                mod360(angle - objectRotation + 90) - 90,
-                ROTATE_SNAP_DIVISION,
-                ROTATE_SNAP_TOLERANCE,
-            );
-            return clamp(coneAngle * 2, MIN_CONE_ANGLE, MAX_CONE_ANGLE);
+            return getNewConeAngleFromPointer(scene, object, pointerPos, modifierKeys, AngleHandleType.CLOCKWISE);
         }
         if (activeHandleId === HandleId.Angle2) {
-            const coneAngle = snapAngle(
-                mod360(angle - objectRotation + 270) - 270,
-                ROTATE_SNAP_DIVISION,
-                ROTATE_SNAP_TOLERANCE,
+            return getNewConeAngleFromPointer(
+                scene,
+                object,
+                pointerPos,
+                modifierKeys,
+                AngleHandleType.COUNTERCLOCKWISE,
             );
-
-            return clamp(-coneAngle * 2, MIN_CONE_ANGLE, MAX_CONE_ANGLE);
         }
     }
 

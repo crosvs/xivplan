@@ -1,15 +1,14 @@
-import { Vector2d } from 'konva/lib/types';
+import type { Vector2d } from 'konva/lib/types';
 import React from 'react';
 import { Circle, Group } from 'react-konva';
 import Icon from '../../assets/zone/exaflare.svg?react';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
+import { registerDropHandler } from '../../DropHandler';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
 import { LayerName } from '../../render/layers';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
-import { ExaflareZone, ObjectType } from '../../scene';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
+import { type ExaflareZone, ObjectType } from '../../scene';
 import { CENTER_DOT_RADIUS, DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { useHighlightProps, useOverrideProps } from '../highlight';
 import { PrefabIcon } from '../PrefabIcon';
@@ -24,20 +23,12 @@ const DEFAULT_RADIUS = 50;
 const DEFAULT_LENGTH = 6;
 
 export const ZoneExaflare: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-
     return (
         <PrefabIcon
-            draggable
             name={NAME}
             icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Exaflare,
-                    },
-                    offset: getDragOffset(e),
-                });
+            object={{
+                type: ObjectType.Exaflare,
             }}
         />
     );
@@ -61,7 +52,7 @@ registerDropHandler<ExaflareZone>(ObjectType.Exaflare, (object, position) => {
 });
 
 const ARROW_W_FRAC = 0.8;
-const ARROW_H_FRAC = 0.5;
+const ARROW_T_FRAC = 0.225;
 
 function getTrailPositions(radius: number, length: number, spacing: number): Vector2d[] {
     return Array.from({ length }).map((_, i) => ({
@@ -113,9 +104,10 @@ const ExaflareRenderer: React.FC<ExaflareRendererProps> = ({ object, radius, rot
                 <HideGroup>
                     <Circle radius={radius} {...style} />
                     <ChevronTail
-                        y={-radius * ARROW_H_FRAC * 0.9}
+                        y={-radius * ARROW_T_FRAC * 2}
                         width={radius * ARROW_W_FRAC}
-                        height={radius * ARROW_H_FRAC}
+                        thickness={radius * ARROW_T_FRAC}
+                        tailGap={radius * ARROW_T_FRAC * 0.15}
                         {...arrow}
                     />
 

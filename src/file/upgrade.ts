@@ -1,47 +1,67 @@
-import { Vector2d } from 'konva/lib/types';
+import type { Vector2d } from 'konva/lib/types';
+import { getAbsoluteRotation, getBaseFacingRotation, rotateCoord } from '../coord';
 import {
-    DrawObject,
-    EnemyObject,
+    type ArrowObject,
+    type DrawObject,
+    EnemyIconStyle,
+    type EnemyObject,
     EnemyRingStyle,
-    ExaflareZone,
-    ImageObject,
-    MarkerObject,
-    PartyObject,
-    PolygonOrientation,
-    PolygonZone,
-    Scene,
-    SceneObject,
-    SceneStep,
-    StackZone,
-    TextObject,
-    TextStyle,
+    type ExaflareZone,
+    type EyeObject,
+    type ImageObject,
+    type LineStackZone,
+    type LineZone,
+    type MarkerObject,
+    type MoveableObject,
+    ObjectType,
+    type PartyObject,
+    type PolygonOrientation,
+    type PolygonZone,
+    ProximityStyle,
+    type ProximityZone,
+    type RectangleZone,
+    type ResizeableObject,
+    type RotateableObject,
+    type Scene,
+    type SceneObject,
+    type SceneStep,
+    type StackZone,
+    type TextObject,
+    type TextStyle,
+    isArrow,
     isDrawObject,
     isEnemy,
     isExaflareZone,
+    isEye,
     isImageObject,
+    isLineStackZone,
+    isLineZone,
     isMarker,
     isParty,
     isPolygonZone,
+    isProximityZone,
     isStackZone,
     isText,
 } from '../scene';
 import { DEFAULT_ENEMY_OPACITY, DEFAULT_IMAGE_OPACITY, DEFAULT_MARKER_OPACITY, DEFAULT_PARTY_OPACITY } from '../theme';
+import { omit, setOrOmit } from '../util';
+import { vecAdd } from '../vector';
 
 export function upgradeScene(scene: Scene): Scene {
     return {
         ...scene,
-        steps: scene.steps.map(upgradeStep),
+        steps: scene.steps.map((step) => upgradeStep(scene, step)),
     };
 }
 
-function upgradeStep(step: SceneStep): SceneStep {
+function upgradeStep(scene: Scene, step: SceneStep): SceneStep {
     return {
         ...step,
-        objects: step.objects.map(upgradeObject),
+        objects: step.objects.map((obj) => upgradeObject(scene, obj)),
     };
 }
 
-function upgradeObject(object: SceneObject): SceneObject {
+function upgradeObject(scene: Scene, object: SceneObject): SceneObject {
     if (isEnemy(object)) {
         object = upgradeEnemy(object);
     }
@@ -78,17 +98,35 @@ function upgradeObject(object: SceneObject): SceneObject {
         object = upgradeStackZone(object);
     }
 
+    if (isLineZone(object) || isLineStackZone(object)) {
+        object = upgradeLineZone(scene, object);
+    }
+
+    if (isArrow(object)) {
+        object = upgradeArrow(scene, object);
+    }
+
+    if (isEye(object)) {
+        object = upgradeEye(object);
+    }
+
+    if (isProximityZone(object)) {
+        object = updateProximityZone(object);
+    }
+
     return object;
 }
 
 // EnemyObject was changed from { rotation?: number }
 // to { rotation: number, omniDirection: boolean, opacity: number }, then
 // to { rotation: number, ring: EnemyRingStyle, opacity: number }
-type LegacyEnemyObject = Omit<EnemyObject, 'opacity' | 'rotation' | 'ring'> & {
+// The `icon: string` property (not configurable after creation) was also replaced with `icon: Enum`.
+type LegacyEnemyObject = Omit<EnemyObject, 'opacity' | 'rotation' | 'ring' | 'icon'> & {
     opacity?: number;
     rotation?: number;
     omniDirection?: boolean;
     ring?: EnemyRingStyle;
+    icon: string | EnemyIconStyle;
 };
 
 function getRingStyle<T extends LegacyEnemyObject>(object: T): EnemyRingStyle {
@@ -103,12 +141,27 @@ function getRingStyle<T extends LegacyEnemyObject>(object: T): EnemyRingStyle {
     return EnemyRingStyle.Directional;
 }
 
+function getEnemyIconStyle<T extends LegacyEnemyObject>(object: T): EnemyIconStyle {
+    switch (object.icon) {
+        case EnemyIconStyle.NoIcon:
+        case EnemyIconStyle.Small:
+        case EnemyIconStyle.Medium:
+        case EnemyIconStyle.Large:
+            return object.icon;
+        default:
+            // While we could guess based on the icon url or even radius,
+            // we should not randomly add extra elements to plans.
+            return EnemyIconStyle.NoIcon;
+    }
+}
+
 function upgradeEnemy(object: LegacyEnemyObject): EnemyObject {
     return {
         ...object,
         rotation: object.rotation ?? 0,
         ring: object.ring ?? getRingStyle(object),
         opacity: object.opacity ?? DEFAULT_ENEMY_OPACITY,
+        icon: getEnemyIconStyle(object),
     };
 }
 
@@ -232,5 +285,145 @@ function upgradeStackZone(object: LegacyStackZone): StackZone {
     return {
         count: 1,
         ...object,
+    };
+}
+
+// ObjectType.LineStack and ObjectType.LineKnockAway were changed from RectangleZone to LineZone
+// Added support for changing hollow property, with ObjectType.LineStack's original rendering appearing as hollow.
+type LegacyLineOrStackZone = Omit<RectangleZone, 'type'> & {
+    type: typeof ObjectType.LineStack | typeof ObjectType.LineKnockAway;
+};
+
+function upgradeLineZone(
+    scene: Scene,
+    object: LineZone | LineStackZone | LegacyLineOrStackZone,
+): LineZone | LineStackZone {
+    if (!('height' in object)) {
+        return object as LineZone | LineStackZone;
+    }
+
+    const isHollow = object.type === ObjectType.LineStack;
+
+    return setOrOmit(convertResizableToLine(scene, object), 'hollow', isHollow);
+}
+
+// Arrow used to be a fancy ZoneRectangle, but is now a fancy ZoneLine
+type LegacyArrow = Omit<ArrowObject, 'length'> & {
+    height: number;
+};
+
+function upgradeArrow(scene: Scene, object: ArrowObject | LegacyArrow): ArrowObject {
+    if (!('height' in object)) {
+        return object as ArrowObject;
+    }
+
+    // The old arrow was scaled from the default-length arrow including "extent" measures that used
+    // the static stroke width, resulting in more deviation from the configured length the more it
+    // was different from the default length. However since we're changing how arrows render anyway,
+    // keeping the coordinates and length value intact is more likely to yield the desired (or
+    // most-expected) outcome for users.
+
+    // Alternative, more accurate to original appearance calculation:
+    // const length = object.height + ((object.height - DEFAULT_ARROW_LENGTH) / DEFAULT_ARROW_LENGTH) * ARROW_STROKE_WIDTH;
+
+    return convertResizableToLine(scene, object);
+}
+
+/**
+ * Calculate the new rotation an object should have to retain the same absolute rotation, after its origin
+ * has been moved by the given offset.
+ */
+function updateRotation(scene: Scene, object: MoveableObject & RotateableObject, offset: Vector2d): number {
+    if (object.facingId === undefined) {
+        return object.rotation;
+    }
+    const originalBaseRotation = getBaseFacingRotation(scene, object);
+    const newBaseRotation = getBaseFacingRotation(scene, { ...object, x: object.x + offset.x, y: object.y + offset.y });
+    return object.rotation + (originalBaseRotation - newBaseRotation);
+}
+
+function convertResizableToLine<T extends ResizeableObject>(
+    scene: Scene,
+    object: T,
+): Omit<T, 'height'> & { length: number } {
+    const absoluteRotation = getAbsoluteRotation(scene, object);
+    const length = object.height;
+    const offset = rotateCoord({ x: 0, y: -length / 2 }, absoluteRotation);
+    const pos = vecAdd(object, offset);
+
+    return {
+        ...omit(object, 'height'),
+        ...pos,
+        length,
+        rotation: updateRotation(scene, object, offset),
+    } as Omit<T, 'height'> & { length: number };
+}
+
+// rotation property was added to EyeObject
+type LegacyEyeObject = Omit<EyeObject, 'rotation'> & {
+    readonly rotation?: number;
+};
+
+function upgradeEye(object: LegacyEyeObject): EyeObject {
+    return {
+        rotation: 0,
+        ...object,
+    };
+}
+
+// ProximityZone was changed to be rotateable.
+// iconProportion was added
+type LegacyProximityZone = Omit<ProximityZone, 'rotation' | 'iconProportion'> & {
+    rotation?: number;
+    iconProportion?: number;
+};
+
+function updateProximityZone(object: LegacyProximityZone): ProximityZone {
+    // Minimum target marker sizes for small zones were removed when adding the proportion setting.
+    // Increase the default proportion to better match the original visuals.
+    let defaultIconProportion = 15;
+    // If the radius was small enough that the original icon display size would not be allowed
+    // (since it would exceed the zone radius), prioritize rendering the icon at the original size
+    // and hide the gradient background.
+    let radiusOverride = object.radius;
+    let hideGradientOverride = object.hideGradient;
+    // If the proportion is already present, the changed visual effects at small sizes are already expected.
+    if (object.iconProportion === undefined) {
+        switch (object.proximityStyle ?? ProximityStyle.Player) {
+            case ProximityStyle.Ground:
+                // The floor marker radius reached its min radius 15 when the object radius was 100
+                // (and has 1:1 scaling)
+                if (object.radius < 100) {
+                    if (object.radius < 30) {
+                        radiusOverride = 30;
+                        hideGradientOverride = true;
+                        defaultIconProportion = 50;
+                    } else {
+                        defaultIconProportion = Math.min(50, Math.round((15 / object.radius) * 100));
+                    }
+                }
+                break;
+            case ProximityStyle.Player:
+                // The player marker radius reached its min radius 60 when the object radius was 200
+                // (but the effective radius of the rendered arrows is 2x that of the floor marker,
+                // so the reference radius is 30)
+                if (object.radius < 200) {
+                    if (object.radius < 60) {
+                        radiusOverride = 60;
+                        hideGradientOverride = true;
+                        defaultIconProportion = 50;
+                    } else {
+                        defaultIconProportion = Math.min(50, Math.round((30 / object.radius) * 100));
+                    }
+                }
+                break;
+        }
+    }
+    return {
+        rotation: 0,
+        iconProportion: defaultIconProportion,
+        ...object,
+        radius: radiusOverride,
+        hideGradient: hideGradientOverride,
     };
 }

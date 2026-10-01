@@ -1,4 +1,4 @@
-import { Vector2d } from 'konva/lib/types';
+import type { Vector2d } from 'konva/lib/types';
 import React, { useCallback, useLayoutEffect, useState } from 'react';
 import { Group } from 'react-konva';
 import { useScene } from '../SceneProvider';
@@ -22,11 +22,14 @@ const TetherEditLayer: React.FC = () => {
     const [, setDefaultCursor] = useDefaultCursor();
     const [tetherConfig] = useTetherConfig();
     const [selection] = useSelection();
-    const { scene, step } = useScene();
+    const { scene, step, arena } = useScene();
     const stage = useStage();
 
     // https://github.com/reactwg/react-compiler/discussions/18
-    const onMouseMove = useCallback(() => setCursor(getPointerPosition(scene, stage)), [setCursor, scene, stage]);
+    const onMouseMove = useCallback(
+        () => setCursor(getPointerPosition(scene, arena, stage)),
+        [setCursor, scene, arena, stage],
+    );
 
     useLayoutEffect(() => {
         if (stage) {

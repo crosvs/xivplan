@@ -17,8 +17,8 @@ import {
     typographyStyles,
 } from '@fluentui/react-components';
 import { PauseRegular, PlayRegular } from '@fluentui/react-icons';
-import React, { memo, ReactNode, useEffect, useRef } from 'react';
-import { CrossStepSelection } from '../CrossStepContext';
+import React, { memo, type ReactNode, useEffect, useRef } from 'react';
+import { type CrossStepSelection } from '../CrossStepContext';
 import { useScene } from '../SceneProvider';
 import { AddStepButton, RemoveStepButton, ReorderStepsButton } from '../StepSelect';
 import { useCrossStepSelection, useSelection, useSimilarObjects } from '../selection';
@@ -214,6 +214,8 @@ export const PlaybackTimeline: React.FC = () => {
                     step={0.01}
                     value={playbackTime}
                     onChange={handleSliderChange}
+                    // An explicit role lets undo/redo hotkeys work while the timeline has focus (see HotkeyHandler).
+                    input={{ role: 'slider' }}
                 />
 
                 {/* Step markers — isolated component so that:
@@ -241,8 +243,14 @@ const PlaybackStepMarkers = memo(function PlaybackStepMarkers({
     const classes = useStyles();
     const { dispatch } = useScene();
     const { setPlaybackTime } = usePlaybackDispatch();
-    const { filters, positionTolerance, selection: crossStep, setSelection: setCrossStep } = useCrossStepSelection();
-    const similar = useSimilarObjects(filters, positionTolerance);
+    const {
+        filters,
+        positionTolerance,
+        rotationTolerance,
+        selection: crossStep,
+        setSelection: setCrossStep,
+    } = useCrossStepSelection();
+    const similar = useSimilarObjects(filters, { position: positionTolerance, rotation: rotationTolerance });
     const [, setSelection] = useSelection();
 
     const handleStepClick = (i: number, e: React.MouseEvent) => {

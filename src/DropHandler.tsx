@@ -1,8 +1,8 @@
-import { Vector2d } from 'konva/lib/types';
+import type { Vector2d } from 'konva/lib/types';
 import React from 'react';
-import { PanelDragObject } from './PanelDragContext';
-import { SceneAction } from './SceneProvider';
-import { SceneObject } from './scene';
+import type { PanelDragObject } from './PanelDragContext';
+import type { SceneAction } from './SceneProvider';
+import type { SceneObject } from './scene';
 import { asArray, round } from './util';
 
 export type DropHandler<T extends SceneObject> = (object: Partial<T>, position: Vector2d) => SceneAction;
@@ -26,7 +26,7 @@ export function getDropAction(object: PanelDragObject, position: Vector2d): Scen
     return undefined;
 }
 
-export function getDragOffset(e: React.DragEvent<HTMLElement>): Vector2d {
+export function getDragOffset(e: React.MouseEvent<HTMLElement>): Vector2d {
     const target = e.target as HTMLElement;
     const rect = target.getBoundingClientRect();
     const centerX = rect.x + rect.width / 2;

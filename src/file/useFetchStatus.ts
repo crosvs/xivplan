@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { getFetchStatus, subscribeFetchStatus } from './nostr';
-import { RelayStatusResult } from './useRelayStatus';
+import { type RelayStatusResult } from './useRelayStatus';
 
 /**
  * Subscribes to the live per-relay progress of whichever `fanGet` call is currently in flight

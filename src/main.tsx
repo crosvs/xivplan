@@ -5,6 +5,9 @@ import { App } from './App';
 import './index.css';
 
 Konva.angleDeg = true;
+// Only the left button drags objects. Konva also drags with the middle button by default, but middle/right
+// button drags pan the canvas instead (see SceneRenderer).
+Konva.dragButtons = [0];
 
 const container = document.getElementById('root');
 if (!container) {

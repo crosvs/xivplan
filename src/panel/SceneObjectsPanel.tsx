@@ -2,21 +2,45 @@ import {
     Button,
     Field,
     SpinButton,
-    SpinButtonChangeEvent,
-    SpinButtonOnChangeData,
+    type SpinButtonChangeEvent,
+    type SpinButtonOnChangeData,
     Text,
     ToggleButton,
+    Tooltip,
     makeStyles,
     mergeClasses,
     tokens,
     typographyStyles,
 } from '@fluentui/react-components';
 import React, { useEffect } from 'react';
-import { DEFAULT_FILTERS } from '../CrossStepContext';
+import { DEFAULT_FILTERS, type SimilarityFilters } from '../CrossStepContext';
 import { useScene } from '../SceneProvider';
 import { useAvailableFilters, useCrossStepSelection, useSelection, useSimilarObjects } from '../selection';
 import { useControlStyles } from '../useControlStyles';
 import { ObjectList } from './ObjectList';
+
+const FILTER_KEYS = [
+    'trackId',
+    'properties',
+    'position',
+    'rotation',
+    'linkedTo',
+] as const satisfies readonly (keyof SimilarityFilters)[];
+
+const FILTER_INFO: Record<keyof SimilarityFilters, { label: string; description: string }> = {
+    trackId: { label: 'Track ID', description: 'Objects with the same Track ID' },
+    properties: {
+        label: 'Size & Shape',
+        description: 'Objects with the same size, shape, and style, e.g. width, length, radius, color, or tether style',
+    },
+    position: { label: '+ Position', description: 'Objects at the same position, within the tolerance' },
+    rotation: { label: '+ Rotation', description: 'Objects facing the same direction, within the tolerance' },
+    linkedTo: {
+        label: 'Linked to',
+        description:
+            'Objects tethered, attached, or facing the same object. On other pages, the linked object must have a Track ID.',
+    },
+};
 
 export interface SceneObjectsPanelProps {
     className?: string;
@@ -33,6 +57,8 @@ export const SceneObjectsPanel: React.FC<SceneObjectsPanelProps> = ({ className 
         setFilters,
         positionTolerance,
         setPositionTolerance,
+        rotationTolerance,
+        setRotationTolerance,
         setSelection: setCrossStep,
     } = useCrossStepSelection();
 
@@ -47,20 +73,18 @@ export const SceneObjectsPanel: React.FC<SceneObjectsPanelProps> = ({ className 
     // Return prev if values are unchanged to avoid a spurious context re-render.
     useEffect(() => {
         setFilters((prev) => {
-            const trackId = prev.trackId && available.trackId;
-            const properties = prev.properties && available.properties;
-            const position = prev.position && available.position;
-            if (trackId === prev.trackId && properties === prev.properties && position === prev.position) {
-                return prev;
+            const next = { ...prev };
+            for (const key of FILTER_KEYS) {
+                next[key] = prev[key] && available[key];
             }
-            return { trackId, properties, position };
+            return FILTER_KEYS.every((key) => next[key] === prev[key]) ? prev : next;
         });
     }, [available, setFilters]);
 
-    const similar = useSimilarObjects(filters, positionTolerance);
+    const similar = useSimilarObjects(filters, { position: positionTolerance, rotation: rotationTolerance });
     const filterMatches = similar.get(stepIndex);
 
-    const anyFilterActive = filters.trackId || filters.properties || filters.position;
+    const anyFilterActive = FILTER_KEYS.some((key) => filters[key]);
     const hasSelection = selection.size > 0;
     const showFilters = hasSelection;
     const showActions = anyFilterActive && similar.size > 0;
@@ -68,6 +92,12 @@ export const SceneObjectsPanel: React.FC<SceneObjectsPanelProps> = ({ className 
     const handleToleranceChange = (_: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
         setPositionTolerance(data.value ?? 0);
     };
+
+    const handleRotationToleranceChange = (_: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
+        setRotationTolerance(data.value ?? 0);
+    };
+
+    const toggleFilter = (key: keyof SimilarityFilters) => setFilters((f) => ({ ...f, [key]: !f[key] }));
 
     const handleSelectOnThisPage = () => {
         if (filterMatches) {
@@ -77,6 +107,11 @@ export const SceneObjectsPanel: React.FC<SceneObjectsPanelProps> = ({ className 
 
     const handleSelectOnAllPages = () => {
         setCrossStep(similar);
+        // Also select the matches on this page, so they are highlighted and moved together like the
+        // matches on other pages, rather than only the original selection.
+        if (filterMatches) {
+            setSelection(new Set(filterMatches));
+        }
     };
 
     const moveObject = (from: number, to: number) => {
@@ -90,33 +125,13 @@ export const SceneObjectsPanel: React.FC<SceneObjectsPanelProps> = ({ className 
                     <div className={classes.filterRow}>
                         <Text className={classes.filterLabel}>Select by:</Text>
                         <div className={classes.pillRow}>
-                            {available.trackId && (
-                                <ToggleButton
-                                    size="small"
-                                    checked={filters.trackId}
-                                    onClick={() => setFilters((f) => ({ ...f, trackId: !f.trackId }))}
-                                >
-                                    Track ID
-                                </ToggleButton>
-                            )}
-                            {available.properties && (
-                                <ToggleButton
-                                    size="small"
-                                    checked={filters.properties}
-                                    onClick={() => setFilters((f) => ({ ...f, properties: !f.properties }))}
-                                >
-                                    Size & Shape
-                                </ToggleButton>
-                            )}
-                            {available.position && (
-                                <ToggleButton
-                                    size="small"
-                                    checked={filters.position}
-                                    onClick={() => setFilters((f) => ({ ...f, position: !f.position }))}
-                                >
-                                    + Position
-                                </ToggleButton>
-                            )}
+                            {FILTER_KEYS.filter((key) => available[key]).map((key) => (
+                                <Tooltip key={key} content={FILTER_INFO[key].description} relationship="description">
+                                    <ToggleButton size="small" checked={filters[key]} onClick={() => toggleFilter(key)}>
+                                        {FILTER_INFO[key].label}
+                                    </ToggleButton>
+                                </Tooltip>
+                            ))}
                         </div>
                     </div>
                     {filters.position && (
@@ -127,6 +142,22 @@ export const SceneObjectsPanel: React.FC<SceneObjectsPanelProps> = ({ className 
                                 min={0}
                                 step={1}
                                 onChange={handleToleranceChange}
+                            />
+                        </Field>
+                    )}
+                    {filters.rotation && (
+                        <Field
+                            label="Rotation tolerance (°)"
+                            orientation="horizontal"
+                            className={classes.toleranceField}
+                        >
+                            <SpinButton
+                                size="small"
+                                value={rotationTolerance}
+                                min={0}
+                                max={180}
+                                step={1}
+                                onChange={handleRotationToleranceChange}
                             />
                         </Field>
                     )}

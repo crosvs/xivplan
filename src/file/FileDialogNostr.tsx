@@ -26,8 +26,8 @@ import {
     KeyRegular,
 } from '@fluentui/react-icons';
 import React, { useRef, useState } from 'react';
-import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
-import { useAsyncFn } from 'react-use';
+import { type HtmlPortalNode, InPortal } from 'react-reverse-portal';
+import { useAsyncFn } from '../useAsyncFn';
 import { CircularRelayIndicator } from './CircularRelayIndicator';
 import { RelayFetchList } from './RelayFetchList';
 import { RelayPublishList } from './RelayPublishList';
@@ -42,7 +42,7 @@ import { useIsDirty, useSetSavedState } from '../useIsDirty';
 import { useConfirmUnsavedChanges } from './confirm';
 import { NostrVaultList } from './NostrVaultList';
 import {
-    NostrPlanInfo,
+    type NostrPlanInfo,
     consensusThreshold,
     exportSecretKeyBlob,
     fetchPlan,
@@ -279,7 +279,7 @@ export const SaveNostr: React.FC<SaveNostrProps> = ({ actions, open }) => {
         setSource(nostrSource);
         setSavedState(canonicalScene);
         setPublishedUrl(url);
-    }, [canonicalScene, newName, planId, visibility, canSave, setSource, setSavedState]);
+    });
 
     const copyUrl = async () => {
         await navigator.clipboard.writeText(publishedUrl);
@@ -407,33 +407,30 @@ export const OpenNostr: React.FC<OpenNostrProps> = ({ actions }) => {
     const fetchProgress = useConsensusProgress();
     const fetchStatus = useFetchStatus();
 
-    const [openState, openPlan] = useAsyncFn(
-        async (pubkey: string, id: string) => {
-            if (isDirty && !(await confirmUnsavedChanges())) return;
+    const [openState, openPlan] = useAsyncFn(async (pubkey: string, id: string) => {
+        if (isDirty && !(await confirmUnsavedChanges())) return;
 
-            const { scene, visibility, name, agreeingRelays, totalRelays } = await fetchPlan(pubkey, id);
-            const nostrSource = { type: 'nostr' as const, id, name, pubkey, visibility };
+        const { scene, visibility, name, agreeingRelays, totalRelays } = await fetchPlan(pubkey, id);
+        const nostrSource = { type: 'nostr' as const, id, name, pubkey, visibility };
 
-            history.replaceState(null, '', getNostrShareUrl(pubkey, id));
+        history.replaceState(null, '', getNostrShareUrl(pubkey, id));
 
-            loadScene(scene);
-            setSource(nostrSource);
-            dismissDialog();
+        loadScene(scene);
+        setSource(nostrSource);
+        dismissDialog();
 
-            if (agreeingRelays < consensusThreshold(totalRelays)) {
-                dispatchToast(
-                    <Toast>
-                        <ToastTitle>
-                            Loaded from {agreeingRelays}/{totalRelays} relays
-                        </ToastTitle>
-                        <ToastBody>This may not be the latest version — not enough relays agreed in time.</ToastBody>
-                    </Toast>,
-                    { intent: 'warning' },
-                );
-            }
-        },
-        [isDirty, loadScene, setSource, dismissDialog, confirmUnsavedChanges, dispatchToast],
-    );
+        if (agreeingRelays < consensusThreshold(totalRelays)) {
+            dispatchToast(
+                <Toast>
+                    <ToastTitle>
+                        Loaded from {agreeingRelays}/{totalRelays} relays
+                    </ToastTitle>
+                    <ToastBody>This may not be the latest version — not enough relays agreed in time.</ToastBody>
+                </Toast>,
+                { intent: 'warning' },
+            );
+        }
+    });
 
     return (
         <>

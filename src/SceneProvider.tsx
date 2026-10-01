@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from 'react';
-import { createContext, Dispatch, PropsWithChildren, SetStateAction, useContext, useState } from 'react';
+import { createContext, type Dispatch, type PropsWithChildren, type SetStateAction, use, useState } from 'react';
 import {
     DefaultAttachPosition,
     getDefaultAttachmentSettings,
@@ -10,86 +10,66 @@ import {
 import { getAbsolutePosition, getAbsoluteRotation } from './coord';
 import { copyObjects } from './copy';
 import {
-    Arena,
-    ArenaShape,
+    type Arena,
     DEFAULT_SCENE,
-    Grid,
     isMoveable,
     isRotateable,
     isTether,
-    MoveableObject,
-    Scene,
-    SceneObject,
-    SceneObjectWithoutId,
-    SceneStep,
-    Tether,
-    Ticks,
+    type MoveableObject,
+    type Scene,
+    type SceneObject,
+    type SceneObjectWithoutId,
+    type SceneStep,
+    type Tether,
 } from './scene';
 import { PreviewModeContext } from './PreviewModeContext';
 import { createUndoContext } from './undo/undoContext';
-import { StateActionBase, UndoRedoAction } from './undo/undoReducer';
+import type { StateActionBase, UndoRedoAction } from './undo/undoReducer';
 import { useSetSavedState } from './useIsDirty';
 import { asArray, clamp, omit } from './util';
 
+/**
+ * Overwrites either the shared arena in Scene, or the custom arena in the current SceneStep if there is one.
+ */
 export interface SetArenaAction {
-    type: 'arena';
+    type: 'setArena';
     value: Arena;
 }
 
-export interface SetArenaShapeAction {
-    type: 'arenaShape';
-    value: ArenaShape;
+/**
+ * Mutates either the shared arena in Scene, or the custom arena in the current SceneStep if there is one.
+ */
+export interface UpdateArenaAction {
+    type: 'updateArena';
+    value: Partial<Arena>;
 }
 
-export interface SetArenaWidthAction {
-    type: 'arenaWidth';
-    value: number;
+/** Enables or disables a specific step having a custom arena setting. On enabling, the global arena setting is copied. */
+export interface SetCustomArenaAction {
+    type: 'customArena';
+    stepIndex: number;
+    enable: boolean;
 }
 
-export interface SetArenaHeightAction {
-    type: 'arenaHeight';
-    value: number;
-}
+export type ArenaAction = SetArenaAction | UpdateArenaAction | SetCustomArenaAction;
 
-export interface SetArenaPaddingAction {
-    type: 'arenaPadding';
-    value: number;
-}
-
-export interface SetArenaGridAction {
-    type: 'arenaGrid';
-    value: Grid;
-}
-
-export interface SetArenaTicksActions {
-    type: 'arenaTicks';
-    value: Ticks;
-}
-
-export interface SetArenaBackgroundAction {
-    type: 'arenaBackground';
-    value: string | undefined;
-}
-
-export interface SetArenaBackgroundOpacityAction {
-    type: 'arenaBackgroundOpacity';
-    value: number;
-}
-
-export type ArenaAction =
-    | SetArenaAction
-    | SetArenaShapeAction
-    | SetArenaWidthAction
-    | SetArenaHeightAction
-    | SetArenaPaddingAction
-    | SetArenaGridAction
-    | SetArenaTicksActions
-    | SetArenaBackgroundAction
-    | SetArenaBackgroundOpacityAction;
-
+/**
+ * Action which replaces existing objects with the given ones. Objects to replace are matched by ID.
+ */
 export interface ObjectUpdateAction {
     type: 'update';
     value: SceneObject | readonly SceneObject[];
+}
+
+/**
+ * Action which applies the given transformation to objects with the given ID(s).
+ */
+export interface ObjectTransformAction {
+    type: 'transform';
+    /** The ID(s) of the objects to update */
+    ids: number | readonly number[];
+    /** The transformation to apply to each object */
+    transformFn: (object: SceneObject, scene: Scene) => SceneObject;
 }
 
 export interface ObjectAddAction {
@@ -131,6 +111,7 @@ export type ObjectAction =
     | ObjectMoveAction
     | GroupMoveAction
     | ObjectUpdateAction
+    | ObjectTransformAction
     | PasteWithTrackIdsAction;
 
 export interface SetStepAction {
@@ -161,13 +142,7 @@ export interface ReorderStepsAction {
 
 export type StepAction = SetStepAction | IncrementStepAction | AddStepAction | RemoveStepAction | ReorderStepsAction;
 
-// TODO: the source should be separate from the undo history
-export interface SetSourceAction {
-    type: 'setSource';
-    source: FileSource | undefined;
-}
-
-export type SceneAction = (ArenaAction | ObjectAction | StepAction | SetSourceAction) & StateActionBase;
+export type SceneAction = (ArenaAction | ObjectAction | StepAction) & StateActionBase;
 
 export interface LocalStorageFileSource {
     type: 'local';
@@ -250,6 +225,7 @@ export const SceneContext = Context;
 export interface SceneContext {
     scene: Scene;
     step: SceneStep;
+    arena: Arena;
     stepIndex: number;
     source?: FileSource;
     dispatch: React.Dispatch<SceneAction | UndoRedoAction<EditorState>>;
@@ -260,12 +236,14 @@ export interface SceneContext {
 
 export function useScene(): SceneContext {
     const [transientPresent, present, dispatch] = usePresent();
-    const [source] = useContext(SourceContext);
+    const [source] = use(SourceContext);
 
+    const currentStep = getCurrentStep(transientPresent);
     return {
         scene: transientPresent.scene,
         canonicalScene: present.scene,
-        step: getCurrentStep(transientPresent),
+        step: currentStep,
+        arena: currentStep.customArena ?? transientPresent.scene.arena,
         stepIndex: transientPresent.currentStep,
         source: source,
         dispatch,
@@ -282,8 +260,8 @@ export const useSceneUndoRedoPossible = useUndoRedoPossible;
 export function useLoadScene(): (scene: Scene, source?: FileSource) => void {
     const { dispatch } = useScene();
     const setSavedState = useSetSavedState();
-    const [, setSource] = useContext(SourceContext);
-    const [, setPreviewMode] = useContext(PreviewModeContext);
+    const [, setSource] = use(SourceContext);
+    const [, setPreviewMode] = use(PreviewModeContext);
 
     return (scene: Scene, source?: FileSource) => {
         dispatch({ type: 'reset', state: { scene, currentStep: 0 } });
@@ -296,7 +274,7 @@ export function useLoadScene(): (scene: Scene, source?: FileSource) => void {
 }
 
 export function useSetSource(): Dispatch<SetStateAction<FileSource | undefined>> {
-    const [, setSource] = useContext(SourceContext);
+    const [, setSource] = use(SourceContext);
     return setSource;
 }
 
@@ -391,15 +369,16 @@ function setStep(state: Readonly<EditorState>, index: number): EditorState {
 }
 
 function addStep(state: Readonly<EditorState>, after: number, sourceObjects?: readonly SceneObject[]): EditorState {
+    const currentStep = getCurrentStep(state);
     // Strip any interpolation-only markers before copying
-    const base = (sourceObjects ?? getCurrentStep(state).objects).map((obj) => {
+    const base = (sourceObjects ?? currentStep.objects).map((obj) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { _ceilOnly, ...rest } = obj as SceneObject & { _ceilOnly?: boolean };
         return rest as SceneObject;
     });
     const { objects, nextId } = copyObjects(state.scene, undefined, base);
 
-    const newStep: SceneStep = { objects };
+    const newStep: SceneStep = { objects, customArena: currentStep.customArena };
 
     const steps = state.scene.steps.slice();
     steps.splice(after + 1, 0, newStep);
@@ -510,7 +489,7 @@ function addObjects(
     return {
         ...state,
         scene: {
-            ...updateStep(state.scene, state.currentStep, { objects: newObjects }),
+            ...updateStep(state.scene, state.currentStep, { ...currentStep, objects: newObjects }),
             nextId,
         },
     };
@@ -559,12 +538,12 @@ function removeObjectsFromStep(
                 : obj,
         );
 
-    return { objects };
+    return { ...step, objects };
 }
 
 function removeObjects(state: Readonly<EditorState>, ids: readonly number[]): EditorState {
     // Object IDs are globally unique across steps, so apply removal to every step that
-    // contains any of the given IDs — this enables cross-step deletion.
+    // contains any of the given IDs â€” this enables cross-step deletion.
     const idSet = new Set(ids);
     let anyChange = false;
 
@@ -590,15 +569,16 @@ function moveObject(state: Readonly<EditorState>, from: number, to: number): Edi
     const items = objects.splice(from, 1);
     objects.splice(to, 0, ...items);
 
-    return updateCurrentStep(state, { objects });
+    return updateCurrentStep(state, { ...currentStep, objects });
 }
 
 function mapSelected(step: Readonly<SceneStep>, ids: readonly number[]) {
     return step.objects.map((object) => ({ object, selected: ids.includes(object.id) }));
 }
 
-function unmapSelected(objects: { object: SceneObject; selected: boolean }[]): SceneStep {
+function unmapSelected(step: Readonly<SceneStep>, objects: { object: SceneObject; selected: boolean }[]): SceneStep {
     return {
+        ...step,
         objects: objects.map((o) => o.object),
     };
 }
@@ -617,7 +597,7 @@ function moveGroupUp(state: Readonly<EditorState>, ids: readonly number[]): Edit
         }
     }
 
-    return updateCurrentStep(state, unmapSelected(objects));
+    return updateCurrentStep(state, unmapSelected(currentStep, objects));
 }
 
 function moveGroupDown(state: Readonly<EditorState>, ids: readonly number[]): EditorState {
@@ -634,7 +614,7 @@ function moveGroupDown(state: Readonly<EditorState>, ids: readonly number[]): Ed
         }
     }
 
-    return updateCurrentStep(state, unmapSelected(objects));
+    return updateCurrentStep(state, unmapSelected(currentStep, objects));
 }
 
 function moveGroupToTop(state: Readonly<EditorState>, ids: readonly number[]): EditorState {
@@ -645,7 +625,7 @@ function moveGroupToTop(state: Readonly<EditorState>, ids: readonly number[]): E
         return (a.selected ? 1 : 0) - (b.selected ? 1 : 0);
     });
 
-    return updateCurrentStep(state, unmapSelected(objects));
+    return updateCurrentStep(state, unmapSelected(currentStep, objects));
 }
 
 function moveGroupToBottom(state: Readonly<EditorState>, ids: readonly number[]): EditorState {
@@ -656,7 +636,7 @@ function moveGroupToBottom(state: Readonly<EditorState>, ids: readonly number[])
         return (b.selected ? 1 : 0) - (a.selected ? 1 : 0);
     });
 
-    return updateCurrentStep(state, unmapSelected(objects));
+    return updateCurrentStep(state, unmapSelected(currentStep, objects));
 }
 
 function updateObjects(state: Readonly<EditorState>, values: readonly SceneObject[]): EditorState {
@@ -677,9 +657,38 @@ function updateObjects(state: Readonly<EditorState>, values: readonly SceneObjec
     return { ...state, scene: { ...state.scene, steps: newSteps } };
 }
 
-function updateArena(state: Readonly<EditorState>, arena: Arena): EditorState {
+function setArena(state: Readonly<EditorState>, arena: Arena): EditorState {
+    const currentStep = state.scene.steps[state.currentStep];
+    if (currentStep?.customArena !== undefined) {
+        return {
+            scene: updateStep(state.scene, state.currentStep, {
+                ...currentStep,
+                customArena: arena,
+            }),
+            currentStep: state.currentStep,
+        };
+    }
     return {
         scene: { ...state.scene, arena },
+        currentStep: state.currentStep,
+    };
+}
+
+function updateArena(state: Readonly<EditorState>, arena: Partial<Arena>): EditorState {
+    const currentStep = state.scene.steps[state.currentStep];
+    return setArena(state, { ...(currentStep?.customArena ?? state.scene.arena), ...arena });
+}
+
+function setCustomArena(state: Readonly<EditorState>, stepIndex: number, enableCustomArena: boolean): EditorState {
+    const step = state.scene.steps[stepIndex];
+    if (!step) {
+        return state;
+    }
+    const newStepValue: SceneStep = enableCustomArena
+        ? { ...step, customArena: state.scene.arena }
+        : omit(step, 'customArena');
+    return {
+        scene: updateStep(state.scene, stepIndex, newStepValue),
         currentStep: state.currentStep,
     };
 }
@@ -710,32 +719,14 @@ function sceneReducer(state: Readonly<EditorState>, action: SceneAction): Editor
         case 'reoderSteps':
             return reoderSteps(state, action.order);
 
-        case 'arena':
+        case 'setArena':
+            return setArena(state, action.value);
+
+        case 'updateArena':
             return updateArena(state, action.value);
 
-        case 'arenaShape':
-            return updateArena(state, { ...state.scene.arena, shape: action.value });
-
-        case 'arenaWidth':
-            return updateArena(state, { ...state.scene.arena, width: action.value });
-
-        case 'arenaHeight':
-            return updateArena(state, { ...state.scene.arena, height: action.value });
-
-        case 'arenaPadding':
-            return updateArena(state, { ...state.scene.arena, padding: action.value });
-
-        case 'arenaGrid':
-            return updateArena(state, { ...state.scene.arena, grid: action.value });
-
-        case 'arenaTicks':
-            return updateArena(state, { ...state.scene.arena, ticks: action.value });
-
-        case 'arenaBackground':
-            return updateArena(state, { ...state.scene.arena, backgroundImage: action.value });
-
-        case 'arenaBackgroundOpacity':
-            return updateArena(state, { ...state.scene.arena, backgroundOpacity: action.value });
+        case 'customArena':
+            return setCustomArena(state, action.stepIndex, action.enable);
 
         case 'add':
             return addObjects(state, action.object);
@@ -778,6 +769,15 @@ function sceneReducer(state: Readonly<EditorState>, action: SceneAction): Editor
 
         case 'update':
             return updateObjects(state, asArray(action.value));
+
+        case 'transform':
+            return updateObjects(
+                state,
+                asArray(action.ids)
+                    .map((id) => getObjectById(state.scene, id))
+                    .filter((obj) => obj !== undefined)
+                    .map((obj) => action.transformFn(obj, state.scene)),
+            );
     }
 
     return state;

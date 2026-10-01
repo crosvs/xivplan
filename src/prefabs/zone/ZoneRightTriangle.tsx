@@ -1,15 +1,14 @@
-import { RectConfig } from 'konva/lib/shapes/Rect';
+import type { RectConfig } from 'konva/lib/shapes/Rect';
 import React from 'react';
 import { Group, Line } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
+import { registerDropHandler } from '../../DropHandler';
 import Icon from '../../assets/zone/right_triangle.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { ObjectType, RectangleZone } from '../../scene';
+import { ObjectType, type RectangleZone } from '../../scene';
 import { DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { ResizeableObjectContainer } from '../ResizeableObjectContainer';
@@ -21,21 +20,14 @@ const NAME = 'Right triangle';
 const DEFAULT_RIGHT_TRIANGLE_SIZE = 150;
 
 export const ZoneRightTriangle: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
     return (
         <PrefabIcon
-            draggable
             name={NAME}
             icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.RightTriangle,
-                        width: DEFAULT_RIGHT_TRIANGLE_SIZE,
-                        height: DEFAULT_RIGHT_TRIANGLE_SIZE,
-                    },
-                    offset: getDragOffset(e),
-                });
+            object={{
+                type: ObjectType.RightTriangle,
+                width: DEFAULT_RIGHT_TRIANGLE_SIZE,
+                height: DEFAULT_RIGHT_TRIANGLE_SIZE,
             }}
         />
     );
@@ -73,30 +65,38 @@ const RightTriangle: React.FC<RectConfig> = ({ width, height, ...props }) => {
 const RightTriangleRenderer: React.FC<RendererProps<RectangleZone>> = ({ object }) => {
     const highlightProps = useHighlightProps(object);
     const overrideProps = useOverrideProps(object);
-    const style = getZoneStyle(object.color, object.opacity, Math.min(object.width, object.height), object.hollow);
-
-    const highlightOffset = style.strokeWidth;
-    const highlightWidth = object.width + highlightOffset;
-    const highlightHeight = object.height + highlightOffset;
 
     return (
         <ResizeableObjectContainer object={object}>
-            {(groupProps) => (
-                <Group {...groupProps} {...overrideProps}>
-                    {highlightProps && (
-                        <RightTriangle
-                            offsetX={highlightOffset / 2}
-                            offsetY={highlightOffset / 2}
-                            width={highlightWidth}
-                            height={highlightHeight}
-                            {...highlightProps}
-                        />
-                    )}
-                    <HideGroup>
-                        <RightTriangle width={object.width} height={object.height} {...style} />
-                    </HideGroup>
-                </Group>
-            )}
+            {(state) => {
+                const style = getZoneStyle(
+                    object.color,
+                    object.opacity,
+                    Math.min(state.width, state.height),
+                    object.hollow,
+                );
+
+                const highlightOffset = style.strokeWidth;
+                const highlightWidth = state.width + highlightOffset;
+                const highlightHeight = state.height + highlightOffset;
+
+                return (
+                    <Group {...state} {...overrideProps}>
+                        {highlightProps && (
+                            <RightTriangle
+                                offsetX={highlightOffset / 2}
+                                offsetY={highlightOffset / 2}
+                                width={highlightWidth}
+                                height={highlightHeight}
+                                {...highlightProps}
+                            />
+                        )}
+                        <HideGroup>
+                            <RightTriangle width={state.width} height={state.height} {...style} />
+                        </HideGroup>
+                    </Group>
+                );
+            }}
         </ResizeableObjectContainer>
     );
 };

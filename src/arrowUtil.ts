@@ -1,3 +1,5 @@
+import { degtorad } from './util';
+
 export interface ArrowStrokeExtent {
     /** Amount the stroke will extend past the top of the arrow head */
     top: number;
@@ -21,7 +23,7 @@ export function getArrowStrokeExtent(length: number, width: number, strokeWidth:
     }
 
     //           +
-    //          /| A
+    //          /| C
     //         / +
     //        / /|
     //       / / |
@@ -40,21 +42,70 @@ export function getArrowStrokeExtent(length: number, width: number, strokeWidth:
     // theta = atan(L / W)
     //
     // Then
-    // A = S / sin(theta)
-    // B = S / tan(theta)
+    // cos(theta) = S / C
+    // L / W = (C + L + S) / (A + B + W)
     //
-    // Top extension = A = S / sin(theta)
+    // Top extension = C = S / cos(theta)
     // Bottom extension = S
-    // Side extension = A + B = S * (1 / sin(theta) + 1 / tan(theta))
+    // Side extension = A + B = ((C + L + S) / (L/W)) - W
 
-    const halfStroke = strokeWidth / 2;
-    const tangent = length / (width / 2);
-    const cotangent = 1 / tangent;
-    const cosecant = 1 / Math.sin(Math.atan(tangent));
-
+    const halfStroke = strokeWidth / 2; // S
+    const halfWidth = width / 2; // W
+    const tangent = length / halfWidth;
+    const topExtent = halfStroke / Math.cos(Math.atan(tangent)); // C
     return {
-        top: halfStroke * cosecant,
+        top: topExtent,
         bottom: halfStroke,
-        side: halfStroke * (cotangent + cosecant),
+        side: (topExtent + length + halfStroke) / tangent - halfWidth, // A + B
     };
+}
+
+export interface ArrowPointerDimensions {
+    pointerWidth: number;
+    pointerLength: number;
+}
+
+/**
+ * Calculate the pointer width and length to get an arrow matching the given dimensions.
+ * @param width the total width of the base of the pointer
+ * @param baseAngle the desired angle at the base of the pointer, in degrees
+ * @param strokeWidth the stroke width used to draw the arrow
+ */
+export function getArrowPointerDimensions(
+    width: number,
+    baseAngle: number,
+    strokeWidth: number,
+): ArrowPointerDimensions {
+    //           +
+    //          /| C
+    //         / O
+    //        / /|
+    //       / / |
+    //      / /  | L
+    //     / /   |
+    //    / /    |
+    //   +-+-----+
+    //  / /|     | S
+    // +-+-+-----+
+    //  A B   W
+    //
+    // Given
+    // width = (A+B+W) * 2
+    // strokeWidth = S * 2
+    // tan(baseAngle) = (C+L+S) / (A+B+W)
+    //
+    // Then
+    // cos(baseAngle) = S / C
+    // tan(baseAngle) = L / W
+
+    const theta = degtorad(baseAngle);
+
+    const halfStroke = strokeWidth / 2; // S
+    const tangent = Math.tan(theta);
+    const totalLength = tangent * (width / 2); // C + L + S
+    const topExtent = halfStroke / Math.cos(theta); // C
+    const pointerLength = totalLength - topExtent - halfStroke; // L
+    const halfWidth = pointerLength / tangent; // W
+
+    return { pointerLength, pointerWidth: halfWidth * 2 };
 }

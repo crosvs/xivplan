@@ -1,7 +1,7 @@
 import { Button, Spinner, makeStyles, tokens } from '@fluentui/react-components';
 import React from 'react';
-import { useAsyncFn } from 'react-use';
-import { RelayHealth, retryRelay } from './nostr';
+import { useAsyncFn } from '../useAsyncFn';
+import { type RelayHealth, retryRelay } from './nostr';
 import { RelayStatusRow } from './RelayStatusRow';
 import { PUBLISH_STATUS_LABELS } from './relayStatusLabels';
 import { useRelayStatus } from './useRelayStatus';
@@ -21,7 +21,7 @@ interface RelayRowProps {
 }
 
 const RelayRow: React.FC<RelayRowProps> = ({ url, status }) => {
-    const [retryState, retry] = useAsyncFn(() => retryRelay(url), [url]);
+    const [retryState, retry] = useAsyncFn(() => retryRelay(url));
 
     return (
         <RelayStatusRow url={url} status={status} label={PUBLISH_STATUS_LABELS[status]}>

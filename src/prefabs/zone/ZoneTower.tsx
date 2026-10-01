@@ -1,15 +1,14 @@
-import { CircleConfig } from 'konva/lib/shapes/Circle';
+import type { CircleConfig } from 'konva/lib/shapes/Circle';
 import React from 'react';
 import { Circle } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
+import { registerDropHandler } from '../../DropHandler';
 import Icon from '../../assets/zone/meteor_tower.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { ObjectType, TowerZone } from '../../scene';
+import { ObjectType, type TowerZone } from '../../scene';
 import { CENTER_DOT_RADIUS, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { RadiusObjectContainer } from '../RadiusObjectContainer';
@@ -22,20 +21,12 @@ const DEFAULT_RADIUS = 40;
 const DEFAULT_COUNT = 1;
 
 export const ZoneTower: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-
     return (
         <PrefabIcon
-            draggable
-            name="Meteor/tower"
+            name="Tower"
             icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Tower,
-                    },
-                    offset: getDragOffset(e),
-                });
+            object={{
+                type: ObjectType.Tower,
             }}
         />
     );
@@ -113,7 +104,7 @@ const TowerDetails: React.FC<ListComponentProps<TowerZone>> = ({ object, ...prop
     return (
         <DetailsItem
             icon={<Icon width="100%" height="100%" style={{ [panelVars.colorZoneOrange]: object.color }} />}
-            name="Meteor/tower"
+            name="Tower"
             object={object}
             {...props}
         />

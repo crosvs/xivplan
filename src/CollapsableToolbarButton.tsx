@@ -1,4 +1,10 @@
-import { SplitButton, SplitButtonProps, ToolbarButton, ToolbarButtonProps, Tooltip } from '@fluentui/react-components';
+import {
+    SplitButton,
+    type SplitButtonProps,
+    ToolbarButton,
+    type ToolbarButtonProps,
+    Tooltip,
+} from '@fluentui/react-components';
 import React from 'react';
 
 // A type alias with an intersection (rather than `interface ... extends ToolbarButtonProps`) is

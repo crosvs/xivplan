@@ -2,7 +2,7 @@ import {
     Button,
     Dialog,
     DialogContent,
-    DialogProps,
+    type DialogProps,
     DialogSurface,
     DialogTitle,
     DialogTrigger,
@@ -80,12 +80,56 @@ export const HelpDialog: React.FC<HelpDialogProps> = (props) => {
 
                                 <dt>Left click + drag</dt>
                                 <dd>Move/transform object</dd>
+                            </dl>
+                            <h3>While dragging control points</h3>
+                            <dl className={classes.hotkeys}>
+                                <dt>
+                                    <HotkeyName keys="shift" />
+                                </dt>
+                                <dd>
+                                    <span>
+                                        Lock/unlock proportions <br /> during transformation<sup>1</sup>
+                                    </span>
+                                </dd>
+                                <dt>
+                                    <HotkeyName keys="ctrl" />
+                                </dt>
+                                <dd>
+                                    <span>
+                                        Resize symmetrically<sup>1</sup>
+                                    </span>
+                                </dd>
 
                                 <dt>
-                                    <HotkeyName keys="shift" suffix="left click + drag" />
+                                    <HotkeyName keys="shift" />
                                 </dt>
-                                <dd>Proportional resize</dd>
+                                <dd>
+                                    <span>
+                                        Keep rotation constant<sup>2</sup>
+                                    </span>
+                                </dd>
+                                <dt>
+                                    <HotkeyName keys="ctrl" />
+                                </dt>
+                                <dd>
+                                    <span>
+                                        Keep length/radius constant<sup>2</sup>
+                                    </span>
+                                </dd>
+
+                                <dt>
+                                    <HotkeyName keys="alt" />
+                                </dt>
+                                <dd>Do not snap to specific angles</dd>
                             </dl>
+                            <div>
+                                <sup>1</sup>: for objects that have their origin in the <br />
+                                object center (job icons, rectangle, etc)
+                            </div>
+                            <div>
+                                <sup>2</sup>: for objects that have their origin on an edge <br />
+                                (cone, line AoE, arrow, etc)
+                            </div>
                         </section>
                     </DialogContent>
                 </HotkeyBlockingDialogBody>

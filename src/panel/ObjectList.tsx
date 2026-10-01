@@ -1,7 +1,7 @@
 import {
     closestCenter,
     DndContext,
-    DragEndEvent,
+    type DragEndEvent,
     KeyboardSensor,
     MouseSensor,
     TouchSensor,
@@ -20,7 +20,7 @@ import { makeStyles, mergeClasses, shorthands, tokens } from '@fluentui/react-co
 import React from 'react';
 import { useIsAllowedConnectionTarget, useUpdateConnectedIdsAction } from '../connections';
 import { EditMode } from '../editMode';
-import { isMoveable, SceneObject } from '../scene';
+import { isMoveable, type SceneObject } from '../scene';
 import { useScene } from '../SceneProvider';
 import { addSelection, selectNone, selectSingle, toggleSelection, useSelection, useSpotlight } from '../selection';
 import { useEditMode } from '../useEditMode';
@@ -149,11 +149,13 @@ const SortableItem: React.FC<SortableItemProps> = ({ object, isFilterMatch }) =>
 
     const isUnselectable = editMode == EditMode.SelectConnection && !isAllowedConnectionTarget;
 
+    // TODO: when reordering items by focusing with the keyboard, pressing space/enter, and using up/down arrows,
+    // any selected objects in the scene also get moved. This should prevent other key handlers from running.
     return (
         <div
             ref={setNodeRef}
             style={style}
-            className={mergeClasses(isDragging && classes.draggingWrapper)}
+            className={mergeClasses(classes.focusWrapper, isDragging && classes.draggingWrapper)}
             onClick={onClick}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
@@ -203,6 +205,13 @@ const useStyles = makeStyles({
     draggingWrapper: {
         position: 'relative',
         zIndex: 1,
+    },
+
+    focusWrapper: {
+        // Make sure normally hidden buttons are visible when the item has keyboard focus
+        [`:focus-within button`]: {
+            opacity: 1,
+        },
     },
 
     item: {

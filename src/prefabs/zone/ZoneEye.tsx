@@ -1,18 +1,17 @@
 import Color from 'colorjs.io';
 import Konva from 'konva';
-import { ShapeConfig } from 'konva/lib/Shape';
-import React, { RefObject, useRef } from 'react';
+import type { ShapeConfig } from 'konva/lib/Shape';
+import React, { type RefObject, useRef } from 'react';
 import { Circle, Group, Line, Path } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
+import { registerDropHandler } from '../../DropHandler';
 import Icon from '../../assets/zone/eye.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { EyeObject, ObjectType } from '../../scene';
+import { type EyeObject, ObjectType } from '../../scene';
 import { panelVars } from '../../theme';
 import { useKonvaCache } from '../../useKonvaCache';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { RadiusObjectContainer } from '../RadiusObjectContainer';
@@ -23,19 +22,12 @@ const DEFAULT_OPACITY = 100;
 const DEFAULT_COLOR = '#ff0000';
 
 export const ZoneEye: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
     return (
         <PrefabIcon
-            draggable
-            name="Look away"
+            name="Gaze"
             icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Eye,
-                    },
-                    offset: getDragOffset(e),
-                });
+            object={{
+                type: ObjectType.Eye,
             }}
         />
     );
@@ -49,6 +41,7 @@ registerDropHandler<EyeObject>(ObjectType.Eye, (object, position) => {
             color: DEFAULT_COLOR,
             opacity: DEFAULT_OPACITY,
             radius: DEFAULT_RADIUS,
+            rotation: 0,
             ...object,
             ...position,
         } as EyeObject,
@@ -110,10 +103,11 @@ const INNER_EYE_PATH = 'M20 0Q10-9 0-9T-20 0Q-10 9 0 9T20 0Z';
 
 interface EyeRendererProps extends RendererProps<EyeObject> {
     radius: number;
+    rotation: number;
     groupRef: RefObject<Konva.Group | null>;
 }
 
-const EyeRenderer: React.FC<EyeRendererProps> = ({ object, radius, groupRef }) => {
+const EyeRenderer: React.FC<EyeRendererProps> = ({ object, rotation, radius, groupRef }) => {
     const highlightProps = useHighlightProps(object);
     const overrideProps = useOverrideProps(object);
     const scale = radius / 20;
@@ -132,11 +126,11 @@ const EyeRenderer: React.FC<EyeRendererProps> = ({ object, radius, groupRef }) =
     const highlightColor = getHighlightColor(object.color);
 
     // Cache so overlapping shapes with opacity appear as one object.
-    useKonvaCache(groupRef, [object.color, object.opacity, radius, highlightProps]);
+    useKonvaCache(groupRef, [object.color, object.opacity, object.invert, object.hide, radius, highlightProps]);
 
     return (
         <>
-            <Group ref={groupRef} {...overrideProps}>
+            <Group rotation={rotation} ref={groupRef} {...overrideProps}>
                 <Group scaleX={scale} scaleY={scale}>
                     {highlightProps && (
                         <Path data={OUTER_EYE_PATH} scaleX={21 / 20} scaleY={22 / 20} {...highlightProps} />
@@ -195,8 +189,10 @@ const EyeContainer: React.FC<RendererProps<EyeObject>> = ({ object }) => {
     const groupRef = useRef<Konva.Group>(null);
 
     return (
-        <RadiusObjectContainer object={object} onTransformEnd={() => groupRef.current?.clearCache()}>
-            {({ radius }) => <EyeRenderer object={object} radius={radius} groupRef={groupRef} />}
+        <RadiusObjectContainer object={object} onTransformEnd={() => groupRef.current?.clearCache()} allowRotate>
+            {({ radius, rotation }) => (
+                <EyeRenderer rotation={rotation} object={object} radius={radius} groupRef={groupRef} />
+            )}
         </RadiusObjectContainer>
     );
 };

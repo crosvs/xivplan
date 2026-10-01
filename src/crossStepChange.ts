@@ -1,7 +1,7 @@
-import { Dispatch } from 'react';
-import { CrossStepSelection } from './CrossStepContext';
-import { SceneAction } from './SceneProvider';
-import { Scene, SceneObject } from './scene';
+import { type Dispatch } from 'react';
+import { type CrossStepSelection } from './CrossStepContext';
+import { type SceneAction } from './SceneProvider';
+import { type Scene, type SceneObject } from './scene';
 
 /**
  * Applies `applyChange` to every object matching the target object's cross-step ("select

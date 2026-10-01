@@ -1,4 +1,4 @@
-import { ObjectType, SceneObject, Tether, TetherType, isMoveable } from '../scene';
+import { ObjectType, type SceneObject, type Tether, TetherType, isMoveable } from '../scene';
 import { COLOR_FUSCHIA, COLOR_GREEN, COLOR_ORANGE } from '../theme';
 import { combinations } from '../util';
 
@@ -23,7 +23,7 @@ export function getTetherName(tether: TetherType) {
     return CONFIGS[tether].name;
 }
 
-export function makeTether(startId: number, endId: number, tether = TetherType.Line): Omit<Tether, 'id'> {
+export function makeTether(startId: number, endId: number, tether: TetherType = TetherType.Line): Omit<Tether, 'id'> {
     return {
         type: ObjectType.Tether,
         tether,
@@ -35,7 +35,10 @@ export function makeTether(startId: number, endId: number, tether = TetherType.L
     };
 }
 
-export function makeTethers(objects: readonly SceneObject[], tether = TetherType.Line): Omit<Tether, 'id'>[] {
+export function makeTethers(
+    objects: readonly SceneObject[],
+    tether: TetherType = TetherType.Line,
+): Omit<Tether, 'id'>[] {
     const result: Omit<Tether, 'id'>[] = [];
 
     for (const [start, end] of combinations(objects)) {

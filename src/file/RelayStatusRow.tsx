@@ -1,6 +1,6 @@
 import { Spinner, makeStyles, tokens } from '@fluentui/react-components';
 import React from 'react';
-import { RelayHealth } from './nostr';
+import { type RelayHealth } from './nostr';
 
 const useStyles = makeStyles({
     row: {

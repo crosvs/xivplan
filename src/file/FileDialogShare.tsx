@@ -7,10 +7,10 @@ import {
     MessageBarBody,
     Spinner,
     Textarea,
-    TextareaOnChangeData,
+    type TextareaOnChangeData,
 } from '@fluentui/react-components';
-import React, { ChangeEvent, useState } from 'react';
-import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
+import React, { type ChangeEvent, useState } from 'react';
+import { type HtmlPortalNode, InPortal } from 'react-reverse-portal';
 import { useLoadScene, useSetSource } from '../SceneProvider';
 import { textToScene } from '../file';
 import type { Scene } from '../scene';

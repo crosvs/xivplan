@@ -1,10 +1,10 @@
 import { makeStyles } from '@fluentui/react-components';
 import Konva from 'konva';
-import { NodeConfig } from 'konva/lib/Node';
-import { ShapeConfig } from 'konva/lib/Shape';
-import { ArrowConfig } from 'konva/lib/shapes/Arrow';
-import { LineConfig } from 'konva/lib/shapes/Line';
-import { Vector2d } from 'konva/lib/types';
+import type { NodeConfig } from 'konva/lib/Node';
+import type { ShapeConfig } from 'konva/lib/Shape';
+import type { ArrowConfig } from 'konva/lib/shapes/Arrow';
+import type { LineConfig } from 'konva/lib/shapes/Line';
+import type { Vector2d } from 'konva/lib/types';
 import * as React from 'react';
 import { Arrow, Circle, Group, Line } from 'react-konva';
 import { CursorGroup } from '../CursorGroup';
@@ -14,17 +14,18 @@ import { getArrowStrokeExtent } from '../arrowUtil';
 import { getCanvasCoordInStep } from '../coord';
 import { EditMode } from '../editMode';
 import { DetailsItem } from '../panel/DetailsItem';
-import { ListComponentProps, getListComponent, registerListComponent } from '../panel/ListComponentRegistry';
-import { RendererProps, registerRenderer } from '../render/ObjectRegistry';
+import { type ListComponentProps, getListComponent, registerListComponent } from '../panel/ListComponentRegistry';
+import { type RendererProps, registerRenderer } from '../render/ObjectRegistry';
 import { ForegroundPortal } from '../render/Portals';
 import { LayerName } from '../render/layers';
 import {
-    FakeCursorObject,
+    type Arena,
+    type FakeCursorObject,
     ObjectType,
-    Scene,
-    SceneObject,
-    SceneStep,
-    Tether,
+    type Scene,
+    type SceneObject,
+    type SceneStep,
+    type Tether,
     TetherType,
     isEnemy,
     isMarker,
@@ -36,7 +37,7 @@ import {
 import { selectNone, useSelection } from '../selection';
 import { panelVars } from '../theme';
 import { useEditMode } from '../useEditMode';
-import { UseKonvaCacheOptions, useKonvaCache } from '../useKonvaCache';
+import { type UseKonvaCacheOptions, useKonvaCache } from '../useKonvaCache';
 import { useTetherConfig } from '../useTetherConfig';
 import { distance, vecAdd, vecMult, vecSub, vecUnit } from '../vector';
 import { HideCutoutGroup, HideGroup } from './HideGroup';
@@ -88,13 +89,14 @@ const INVALID_END_POS: Vector2d = { x: 20, y: 0 };
 function getTargetPoints(
     scene: Scene,
     step: SceneStep,
+    arena: Arena,
     startObject: SceneObject | undefined,
     endObject: SceneObject | undefined,
 ): [Vector2d, Vector2d] {
     const startPos = isMoveable(startObject) ? startObject : INVALID_START_POS;
     const endPos = isMoveable(endObject) ? endObject : INVALID_END_POS;
 
-    return [getCanvasCoordInStep(scene, step, startPos), getCanvasCoordInStep(scene, step, endPos)];
+    return [getCanvasCoordInStep(step, arena, startPos), getCanvasCoordInStep(step, arena, endPos)];
 }
 
 function isGroundObject(object: SceneObject) {
@@ -128,11 +130,12 @@ function getTargetOffset(object: SceneObject | undefined): number {
 function getTetherPoints(
     scene: Scene,
     step: SceneStep,
+    arena: Arena,
     startObject: SceneObject | undefined,
     endObject: SceneObject | undefined,
     addOffset = 0,
 ): [Vector2d, Vector2d] {
-    const [start, end] = getTargetPoints(scene, step, startObject, endObject);
+    const [start, end] = getTargetPoints(scene, step, arena, startObject, endObject);
 
     const unit = vecUnit(vecSub(end, start));
     const dist = distance(start, end);
@@ -154,14 +157,23 @@ function getHighlightProps(object: Tether, baseHighlightProps: ShapeConfig): Nod
 interface TetherProps extends RendererProps<Tether> {
     scene: Scene;
     step: SceneStep;
+    arena: Arena;
     highlightProps?: ShapeConfig;
     magnetOverrideProps?: ShapeConfig;
     startObject: SceneObject | undefined;
     endObject: SceneObject | undefined;
 }
 
-const LineTetherRenderer: React.FC<TetherProps> = ({ object, scene, step, highlightProps, startObject, endObject }) => {
-    const [start, end] = getTetherPoints(scene, step, startObject, endObject);
+const LineTetherRenderer: React.FC<TetherProps> = ({
+    object,
+    scene,
+    step,
+    arena,
+    highlightProps,
+    startObject,
+    endObject,
+}) => {
+    const [start, end] = getTetherPoints(scene, step, arena, startObject, endObject);
     const lineProps: LineConfig = {
         points: [start.x, start.y, end.x, end.y],
         fill: object.color,
@@ -188,13 +200,15 @@ const CloseTetherRenderer: React.FC<TetherProps> = ({
     object,
     scene,
     step,
+    arena,
     highlightProps,
     startObject,
     endObject,
 }) => {
-    const [start, end] = getTetherPoints(scene, step, startObject, endObject);
+    const extent = getArrowStrokeExtent(POINTER_LENGTH, POINTER_WIDTH, object.width);
+    const [start, end] = getTetherPoints(scene, step, arena, startObject, endObject);
     const center = vecMult(vecAdd(start, end), 0.5);
-    const offset = vecMult(vecUnit(vecSub(end, start)), object.width * 1.25);
+    const offset = vecMult(vecUnit(vecSub(end, start)), extent.top);
 
     const c1 = vecSub(center, offset);
     const c2 = vecAdd(center, offset);
@@ -234,11 +248,19 @@ const CloseTetherRenderer: React.FC<TetherProps> = ({
     );
 };
 
-const FarTetherRenderer: React.FC<TetherProps> = ({ object, scene, step, highlightProps, startObject, endObject }) => {
+const FarTetherRenderer: React.FC<TetherProps> = ({
+    object,
+    scene,
+    step,
+    arena,
+    highlightProps,
+    startObject,
+    endObject,
+}) => {
     // Shrink the tether by the amount that the stroke extends past the tips of the arrows.
     const extent = getArrowStrokeExtent(POINTER_LENGTH, POINTER_WIDTH, object.width);
 
-    const [start, end] = getTetherPoints(scene, step, startObject, endObject, extent.top * 2);
+    const [start, end] = getTetherPoints(scene, step, arena, startObject, endObject, extent.top);
 
     const arrowProps: ArrowConfig = {
         points: [start.x, start.y, end.x, end.y],
@@ -277,6 +299,7 @@ const MagnetTetherRenderer: React.FC<MagnetTetherProps> = ({
     object,
     scene,
     step,
+    arena,
     highlightProps,
     magnetOverrideProps,
     startObject,
@@ -284,7 +307,7 @@ const MagnetTetherRenderer: React.FC<MagnetTetherProps> = ({
     startType,
     endType,
 }) => {
-    const [start, end] = getTetherPoints(scene, step, startObject, endObject, object.width);
+    const [start, end] = getTetherPoints(scene, step, arena, startObject, endObject, object.width);
 
     const lineProps: LineConfig = {
         points: [start.x, start.y, end.x, end.y],
@@ -384,7 +407,7 @@ const TetherRenderer: React.FC<RendererProps<Tether>> = ({ object }) => {
     const overrideProps = useOverrideProps(object);
     const groupRef = React.useRef<Konva.Group>(null);
     const [editMode] = useEditMode();
-    const { scene, step } = useScene();
+    const { scene, step, arena } = useScene();
     const displayObjects = useDisplayObjectsList();
 
     const startObject = displayObjects.find(
@@ -415,6 +438,7 @@ const TetherRenderer: React.FC<RendererProps<Tether>> = ({ object }) => {
                             object={object}
                             scene={scene}
                             step={step}
+                            arena={arena}
                             highlightProps={highlightProps}
                             magnetOverrideProps={overrideProps}
                             startObject={startObject}
@@ -437,7 +461,7 @@ export interface TetherToCursorProps {
 
 export const TetherToCursor: React.FC<TetherToCursorProps> = ({ startObject, cursorPos, tether }) => {
     const groupRef = React.useRef<Konva.Group>(null);
-    const { scene, step } = useScene();
+    const { scene, step, arena } = useScene();
 
     const fakeTetherObject: Tether = {
         id: -1,
@@ -465,6 +489,7 @@ export const TetherToCursor: React.FC<TetherToCursorProps> = ({ startObject, cur
                     object={fakeTetherObject}
                     scene={scene}
                     step={step}
+                    arena={arena}
                     startObject={startObject}
                     endObject={fakeCursorObject}
                 />

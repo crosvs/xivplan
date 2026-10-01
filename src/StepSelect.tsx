@@ -1,6 +1,6 @@
 import {
     DndContext,
-    DragEndEvent,
+    type DragEndEvent,
     KeyboardSensor,
     PointerSensor,
     closestCenter,
@@ -12,7 +12,7 @@ import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable } 
 import { CSS } from '@dnd-kit/utilities';
 import {
     Button,
-    ButtonProps,
+    type ButtonProps,
     Dialog,
     DialogActions,
     DialogContent,
@@ -27,13 +27,13 @@ import {
 } from '@fluentui/react-components';
 import { AddFilled, ArrowSwapRegular, DeleteFilled, DeleteRegular, bundleIcon } from '@fluentui/react-icons';
 import Konva from 'konva';
-import React, { HTMLAttributes, RefAttributes, memo, useCallback, useRef, useState } from 'react';
+import React, { type HTMLAttributes, type RefAttributes, memo, useCallback, useRef, useState } from 'react';
 import { HotkeyBlockingDialogBody } from './HotkeyBlockingDialogBody';
 import { useScene } from './SceneProvider';
 import { useOptionalPlaybackDispatch } from './playback/PlaybackContext';
 import { interpolateStep } from './playback/interpolate';
 import { ScenePreview } from './render/SceneRenderer';
-import { Scene, SceneObject } from './scene';
+import type { Scene, SceneObject } from './scene';
 import { useCancelConnectionSelection } from './useEditMode';
 
 const PREVIEW_SIZE = 180;
@@ -280,6 +280,7 @@ const StepPreviewImage = memo(function StepPreviewImage({ scene, stepIndex }: St
         <ScenePreview
             ref={captureStage}
             scene={scene}
+            arena={scene.steps[stepIndex]?.customArena ?? scene.arena}
             stepIndex={stepIndex}
             width={PREVIEW_SIZE}
             height={PREVIEW_SIZE}

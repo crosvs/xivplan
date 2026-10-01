@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import {
-    ConsensusProgress,
+    type ConsensusProgress,
     getConsensusProgress,
     getPublishProgress,
     subscribeConsensusProgress,

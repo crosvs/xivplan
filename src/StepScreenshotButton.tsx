@@ -4,16 +4,17 @@ import {
     DialogTrigger,
     Field,
     Select,
+    Switch,
     makeStyles,
     Portal,
     Toast,
     ToastTitle,
     useToastController,
 } from '@fluentui/react-components';
+import { useLocalStorageValue, useTimeoutEffect } from '@react-hookz/web';
 import Konva from 'konva';
-import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
-import { useLocalStorage, useTimeoutFn } from 'react-use';
+import React, { use, useCallback, useEffect, useRef, useState } from 'react';
+import { type HtmlPortalNode, InPortal } from 'react-reverse-portal';
 import { getCanvasSize } from './coord';
 import { MessageToast } from './MessageToast';
 import { ObjectLoadingContext } from './ObjectLoadingContext';
@@ -34,7 +35,10 @@ const SCREENSHOT_TIMEOUT = 1000;
  */
 function useScreenshotCapture() {
     const classes = useStyles();
-    const [scale, setScale] = useLocalStorage('screenshotPixelRatio', 1);
+    const { value: scale, set: setScale } = useLocalStorageValue('screenshotPixelRatio', { defaultValue: 2 });
+    const { value: transparent, set: setTransparent } = useLocalStorageValue('screenshotTransparent', {
+        defaultValue: false,
+    });
     const [takingScreenshot, setTakingScreenshot] = useState(false);
     const { dispatchToast } = useToastController();
     const cancelConnectionSelection = useCancelConnectionSelection();
@@ -59,23 +63,22 @@ function useScreenshotCapture() {
         dispatchToast(<MessageToast title="Error" message="Screenshot timed out" />, { intent: 'error' });
     };
 
-    const [, , startTimeout] = useTimeoutFn(handleTimeout, SCREENSHOT_TIMEOUT);
+    useTimeoutEffect(handleTimeout, takingScreenshot ? SCREENSHOT_TIMEOUT : undefined);
 
     const startScreenshot = () => {
         cancelConnectionSelection();
         setTakingScreenshot(true);
-        startTimeout();
     };
 
     const portal = takingScreenshot ? (
         <Portal mountNode={{ className: classes.screenshot }}>
             <ObjectLoadingProvider>
-                <ScreenshotComponent scale={scale} onScreenshotDone={handleScreenshotDone} />
+                <ScreenshotComponent scale={scale} transparent={transparent} onScreenshotDone={handleScreenshotDone} />
             </ObjectLoadingProvider>
         </Portal>
     ) : null;
 
-    return { scale, setScale, takingScreenshot, startScreenshot, portal };
+    return { scale, setScale, transparent, setTransparent, takingScreenshot, startScreenshot, portal };
 }
 
 /** Keeps the ctrl+shift+c screenshot shortcut working regardless of whether the Share dialog is open. */
@@ -101,7 +104,8 @@ export interface ScreenshotTabProps {
 
 /** Screenshot tab content for the Share dialog. */
 export const ScreenshotTab: React.FC<ScreenshotTabProps> = ({ actions }) => {
-    const { scale, setScale, takingScreenshot, startScreenshot, portal } = useScreenshotCapture();
+    const { scale, setScale, transparent, setTransparent, takingScreenshot, startScreenshot, portal } =
+        useScreenshotCapture();
 
     return (
         <>
@@ -112,6 +116,11 @@ export const ScreenshotTab: React.FC<ScreenshotTabProps> = ({ actions }) => {
                     <option value="4">4×</option>
                 </Select>
             </Field>
+            <Switch
+                label="Transparent background"
+                checked={!!transparent}
+                onChange={(_, d) => setTransparent(d.checked)}
+            />
             <p>Copies an image of the current step to your clipboard.</p>
 
             <InPortal node={actions}>
@@ -140,14 +149,16 @@ const ScreenshotSuccessToast = () => {
 
 interface ScreenshotComponentProps {
     scale?: number;
+    transparent?: boolean;
     onScreenshotDone: (error?: unknown) => void;
 }
 
-const ScreenshotComponent: React.FC<ScreenshotComponentProps> = ({ scale, onScreenshotDone }) => {
-    const { isLoading } = useContext(ObjectLoadingContext);
-    const { scene, stepIndex } = useScene();
+const ScreenshotComponent: React.FC<ScreenshotComponentProps> = ({ scale, transparent, onScreenshotDone }) => {
+    const { isLoading } = use(ObjectLoadingContext);
+    const { scene, arena, stepIndex } = useScene();
     const [frozenScene] = useState(scene);
     const [frozenStepIndex] = useState(stepIndex);
+    const [frozenArena] = useState(arena);
     const ref = useRef<Konva.Stage>(null);
 
     // https://github.com/reactwg/react-compiler/discussions/18
@@ -169,31 +180,34 @@ const ScreenshotComponent: React.FC<ScreenshotComponentProps> = ({ scale, onScre
     // to load resources have reported that they are loading.
     const [firstRender, setFirstRender] = useState(true);
     useEffect(() => {
-        setTimeout(() => setFirstRender(false));
+        const timeout = setTimeout(() => setFirstRender(false));
+        return () => clearTimeout(timeout);
     }, [setFirstRender]);
 
     // Avoid double screenshot in development builds.
-    const screenshotTaken = useRef(false);
+    const screenshotTakenRef = useRef(false);
 
     useEffect(() => {
-        if (!firstRender && !isLoading && !screenshotTaken.current) {
+        if (!firstRender && !isLoading && !screenshotTakenRef.current) {
             takeScreenshot();
 
             return () => {
-                screenshotTaken.current = true;
+                screenshotTakenRef.current = true;
             };
         }
     }, [firstRender, isLoading, takeScreenshot]);
 
-    const size = getCanvasSize(frozenScene);
+    const size = getCanvasSize(frozenArena);
 
     return (
         <ScenePreview
             ref={ref}
             scene={frozenScene}
+            arena={frozenArena}
             stepIndex={frozenStepIndex}
             width={size.width}
             height={size.height}
+            backgroundColor={transparent ? 'transparent' : undefined}
         />
     );
 };

@@ -1,4 +1,4 @@
-import { KonvaEventObject } from 'konva/lib/Node';
+import { type KonvaEventObject } from 'konva/lib/Node';
 import React, { useLayoutEffect } from 'react';
 import { Rect } from 'react-konva';
 import { useDefaultCursor } from '../cursor';

@@ -1,27 +1,29 @@
 import {
     Field,
     Label,
-    Slider,
-    SliderOnChangeData,
-    SliderProps,
     makeStyles,
     mergeClasses,
+    Slider,
     tokens,
+    type SliderOnChangeData,
+    type SliderProps,
 } from '@fluentui/react-components';
-import React, { useState } from 'react';
+import React, { useState, type ReactNode } from 'react';
 
-export interface OpacitySliderOnChangeData extends SliderOnChangeData {
+export interface SliderFieldOnChangeData extends SliderOnChangeData {
     transient: boolean;
 }
 
-export interface OpacitySliderProps extends Omit<SliderProps, 'onChange'> {
-    label?: string;
-    onChange?: (ev: React.ChangeEvent<HTMLInputElement>, data: OpacitySliderOnChangeData) => void;
+export interface SliderFieldProps extends Omit<SliderProps, 'onChange'> {
+    label: string;
+    showValue?: boolean | ((value: number | undefined) => ReactNode);
+    onChange?: (ev: React.ChangeEvent<HTMLInputElement>, data: SliderFieldOnChangeData) => void;
     onCommit?: () => void;
 }
 
-export const OpacitySlider: React.FC<OpacitySliderProps> = ({
+export const SliderField: React.FC<SliderFieldProps> = ({
     label,
+    showValue,
     disabled,
     className,
     value,
@@ -54,13 +56,10 @@ export const OpacitySlider: React.FC<OpacitySliderProps> = ({
     };
 
     return (
-        <Field label={label ?? 'Opacity'} className={className}>
+        <Field label={label} className={className}>
             <div className={classes.wrapper}>
                 <Slider
                     value={value ?? 0}
-                    min={5}
-                    max={100}
-                    step={5}
                     aria-valuetext={ariaValueText}
                     className={classes.slider}
                     disabled={disabled}
@@ -69,9 +68,11 @@ export const OpacitySlider: React.FC<OpacitySliderProps> = ({
                     onMouseUp={handleMouseUp}
                     {...props}
                 />
-                <Label aria-hidden className={mergeClasses(classes.valueLabel, disabled && classes.disabled)}>
-                    {valueText}
-                </Label>
+                {showValue && (
+                    <Label aria-hidden className={mergeClasses(classes.valueLabel, disabled && classes.disabled)}>
+                        {showValue === true ? valueText : showValue(value)}
+                    </Label>
+                )}
             </div>
         </Field>
     );

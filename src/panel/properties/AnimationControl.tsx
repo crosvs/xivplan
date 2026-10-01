@@ -4,16 +4,16 @@ import {
     Label,
     Select,
     Slider,
-    SliderOnChangeData,
+    type SliderOnChangeData,
     makeStyles,
     tokens,
 } from '@fluentui/react-components';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useScene } from '../../SceneProvider';
-import { AnimationProps, EasingStyle, PulseStyle, SceneObject } from '../../scene';
+import { type AnimationProps, type EasingStyle, type PulseStyle, type SceneObject } from '../../scene';
 import { commonValue } from '../../util';
 import { useOptionalPlaybackDispatch } from '../../playback/PlaybackContext';
-import { PropertiesControlProps } from '../PropertiesControl';
+import { type PropertiesControlProps } from '../PropertiesControl';
 
 // ─── Easing options ───────────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-import { useMedia, useWindowSize } from 'react-use';
+import { useMediaQuery, useWindowSize } from '@react-hookz/web';
 import { PANEL_WIDTH } from './panel/PanelStyles';
 import { usePreviewMode } from './usePreviewMode';
 
@@ -76,7 +76,7 @@ export function getHeaderCollapseState(availableWidth: number, logoWidth: number
 
 export function useHeaderCollapseState(): HeaderCollapseState {
     const { width } = useWindowSize();
-    const isPortrait = useMedia('(orientation: portrait)');
+    const isPortrait = useMediaQuery('(orientation: portrait)') ?? false;
     const [previewMode] = usePreviewMode();
     return getHeaderCollapseState(width, isPortrait || previewMode ? LOGO_WIDTH_AUTO : LOGO_WIDTH_ALIGNED);
 }

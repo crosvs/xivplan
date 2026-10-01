@@ -26,9 +26,9 @@ import {
     tokens,
 } from '@fluentui/react-components';
 import { AlertFilled, AlertOffRegular, AlertRegular } from '@fluentui/react-icons';
-import Konva from 'konva';
+import type Konva from 'konva';
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import { HtmlPortalNode, InPortal } from 'react-reverse-portal';
+import { type HtmlPortalNode, InPortal } from 'react-reverse-portal';
 import { ArrayBufferTarget, Muxer } from 'webm-muxer';
 import { getCanvasSize } from '../coord';
 import { downloadBlob } from '../file/blob';
@@ -36,6 +36,7 @@ import { ObjectLoadingContext } from '../ObjectLoadingContext';
 import { ObjectLoadingProvider } from '../ObjectLoadingProvider';
 import { useOptionalPlayback } from '../playback/PlaybackContext';
 import { ScenePreview } from '../render/SceneRenderer';
+import type { Scene } from '../scene';
 import { useScene } from '../SceneProvider';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -151,6 +152,21 @@ interface VideoCaptureProps {
  *
  * Must be wrapped in ObjectLoadingProvider.
  */
+/**
+ * The video frame size: large enough to fit the arena of every step, since steps can each have a
+ * custom arena. Each frame then draws its own step's arena centered within that frame.
+ */
+function getExportSize(scene: Scene): { width: number; height: number } {
+    const sizes = [scene.arena, ...scene.steps.map((step) => step.customArena)]
+        .filter((arena) => arena !== undefined)
+        .map(getCanvasSize);
+
+    return {
+        width: Math.max(...sizes.map((size) => size.width)),
+        height: Math.max(...sizes.map((size) => size.height)),
+    };
+}
+
 const VideoCapture: React.FC<VideoCaptureProps> = ({
     speed,
     pixelRatio,
@@ -161,7 +177,7 @@ const VideoCapture: React.FC<VideoCaptureProps> = ({
     cancelRef,
 }) => {
     const { scene } = useScene();
-    const size = getCanvasSize(scene);
+    const size = getExportSize(scene);
     const maxStep = scene.steps.length - 1;
     const totalFrames = totalFrameCount(maxStep, speed, framerate);
 
@@ -271,11 +287,13 @@ const VideoCapture: React.FC<VideoCaptureProps> = ({
     const playbackTime =
         frame < 0 ? 0 : frameToPlaybackTime(frame, maxStep, speed, framerate, pausedFrameCount(speed, framerate) * 2);
     const pulseTime = Math.max(0, frame / framerate) % 1000;
+    const arena = scene.steps[Math.min(Math.floor(playbackTime), maxStep)]?.customArena ?? scene.arena;
 
     return (
         <ScenePreview
             ref={stageRef}
             scene={scene}
+            arena={arena}
             width={size.width}
             height={size.height}
             playbackTime={playbackTime}

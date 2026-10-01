@@ -1,16 +1,15 @@
 import { Field } from '@fluentui/react-components';
 import React from 'react';
-import { useScene } from '../../SceneProvider';
 import { Segment, SegmentedGroup } from '../../Segmented';
 import { SpinButton } from '../../SpinButton';
 import { getTetherName } from '../../prefabs/TetherConfig';
 import { TetherIcon } from '../../prefabs/TetherIcon';
 import { MIN_TETHER_WIDTH } from '../../prefabs/bounds';
-import { useSpinChanged } from '../../prefabs/useSpinChanged';
-import { Tether, TetherType } from '../../scene';
+import { type Tether, TetherType } from '../../scene';
 import { useControlStyles } from '../../useControlStyles';
+import { useObjectUpdater } from '../../useObjectUpdater';
 import { commonValue } from '../../util';
-import { PropertiesControlProps } from '../PropertiesControl';
+import type { PropertiesControlProps } from '../PropertiesControl';
 
 const TETHER_TYPES = [
     TetherType.Line,
@@ -22,12 +21,11 @@ const TETHER_TYPES = [
 ];
 
 export const TetherTypeControl: React.FC<PropertiesControlProps<Tether>> = ({ objects }) => {
-    const { dispatch } = useScene();
+    const update = useObjectUpdater(objects);
 
     const tether = commonValue(objects, (obj) => obj.tether);
 
-    const onTetherChanged = (tether: TetherType) =>
-        dispatch({ type: 'update', value: objects.map((obj) => ({ ...obj, tether })) });
+    const onTetherChanged = (tether: TetherType) => update({ props: { tether } });
 
     return (
         <Field label="Tether type">
@@ -52,17 +50,15 @@ export const TetherTypeControl: React.FC<PropertiesControlProps<Tether>> = ({ ob
 
 export const TetherWidthControl: React.FC<PropertiesControlProps<Tether>> = ({ objects }) => {
     const classes = useControlStyles();
-    const { dispatch } = useScene();
+    const update = useObjectUpdater(objects);
 
     const width = commonValue(objects, (obj) => obj.width);
 
-    const onWidthChanged = useSpinChanged((width: number) =>
-        dispatch({ type: 'update', value: objects.map((obj) => ({ ...obj, width })) }),
-    );
+    const onWidthChanged = (width: number) => update({ props: { width } });
 
     return (
         <Field label="Width" className={classes.cell}>
-            <SpinButton value={width} onChange={onWidthChanged} min={MIN_TETHER_WIDTH} step={2} />
+            <SpinButton value={width} onValueChange={onWidthChanged} min={MIN_TETHER_WIDTH} step={2} />
         </Field>
     );
 };

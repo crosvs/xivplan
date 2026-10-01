@@ -1,16 +1,16 @@
 import * as React from 'react';
 import { Group, Image, Rect } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../DropHandler';
+import { registerDropHandler } from '../DropHandler';
 import { getJob, getJobIconUrl, Job } from '../jobs';
 import { DetailsItem } from '../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../panel/ListComponentRegistry';
+import { type ListComponentProps, registerListComponent } from '../panel/ListComponentRegistry';
 import { LayerName } from '../render/layers';
-import { registerRenderer, RendererProps } from '../render/ObjectRegistry';
-import { ObjectType, PartyObject } from '../scene';
+import { registerRenderer, type RendererProps } from '../render/ObjectRegistry';
+import { ObjectType, type PartyObject } from '../scene';
 import { DEFAULT_PARTY_OPACITY } from '../theme';
 import { useImageTracked } from '../useObjectLoading';
-import { usePanelDrag } from '../usePanelDrag';
 import { makeDisplayName } from '../util';
+import { ModifierKeyBehavior } from './controlpoints';
 import { HideGroup } from './HideGroup';
 import { useHighlightProps, useOverrideProps } from './highlight';
 import { PrefabIcon } from './PrefabIcon';
@@ -25,23 +25,16 @@ function makeIcon(job: Job) {
     const { icon, name } = getJob(job);
 
     const Component: React.FC = () => {
-        const [, setDragObject] = usePanelDrag();
         const iconUrl = getJobIconUrl(icon);
 
         return (
             <PrefabIcon
-                draggable
                 name={name}
                 icon={iconUrl}
-                onDragStart={(e) => {
-                    setDragObject({
-                        object: {
-                            type: ObjectType.Party,
-                            image: iconUrl,
-                            name,
-                        },
-                        offset: getDragOffset(e),
-                    });
+                object={{
+                    type: ObjectType.Party,
+                    image: iconUrl,
+                    name,
                 }}
             />
         );
@@ -74,24 +67,25 @@ const PartyRenderer: React.FC<RendererProps<PartyObject>> = ({ object }) => {
     const [image] = useImageTracked(object.image);
 
     return (
-        <ResizeableObjectContainer object={object} transformerProps={{ centeredScaling: true }}>
-            {(groupProps) => (
-                <Group {...groupProps} {...overrideProps}>
+        <ResizeableObjectContainer
+            object={object}
+            transformationProps={{
+                centerScalingBehavior: ModifierKeyBehavior.ForceEnabled,
+                keepRatioBehavior: ModifierKeyBehavior.Inverted,
+            }}
+        >
+            {(state) => (
+                <Group {...state} {...overrideProps}>
                     {highlightProps && (
                         <Rect
-                            width={object.width}
-                            height={object.height}
-                            cornerRadius={(object.width + object.height) / 2 / 5}
+                            width={state.width}
+                            height={state.height}
+                            cornerRadius={(state.width + state.height) / 2 / 5}
                             {...highlightProps}
                         />
                     )}
                     <HideGroup>
-                        <Image
-                            image={image}
-                            width={object.width}
-                            height={object.height}
-                            opacity={object.opacity / 100}
-                        />
+                        <Image image={image} width={state.width} height={state.height} opacity={object.opacity / 100} />
                     </HideGroup>
                 </Group>
             )}
@@ -108,15 +102,33 @@ const PartyDetails: React.FC<ListComponentProps<PartyObject>> = ({ object, ...pr
 registerListComponent<PartyObject>(ObjectType.Party, PartyDetails);
 
 export const PartyAny = makeIcon(Job.RoleAny);
-export const PartyTank = makeIcon(Job.RoleTank);
-export const PartyHealer = makeIcon(Job.RoleHealer);
-export const PartyDps = makeIcon(Job.RoleDps);
 export const PartySupport = makeIcon(Job.RoleSupport);
+
+export const PartyTank = makeIcon(Job.RoleTank);
+export const PartyTank1 = makeIcon(Job.RoleTank1);
+export const PartyTank2 = makeIcon(Job.RoleTank2);
+
+export const PartyHealer = makeIcon(Job.RoleHealer);
+export const PartyHealer1 = makeIcon(Job.RoleHealer1);
+export const PartyHealer2 = makeIcon(Job.RoleHealer2);
+export const PartyPureHealer = makeIcon(Job.RolePureHealer);
+export const PartyBarrierHealer = makeIcon(Job.RoleBarrierHealer);
 export const PartyFakeHealer = makeIcon(Job.RoleFakeHeal);
 export const PartyFakeTank = makeIcon(Job.RoleFakeTank);
 
+export const PartyDps = makeIcon(Job.RoleDps);
+export const PartyDps1 = makeIcon(Job.RoleDps1);
+export const PartyDps2 = makeIcon(Job.RoleDps2);
+export const PartyDps3 = makeIcon(Job.RoleDps3);
+export const PartyDps4 = makeIcon(Job.RoleDps4);
+
 export const PartyMelee = makeIcon(Job.RoleMelee);
+export const PartyMelee1 = makeIcon(Job.RoleMelee1);
+export const PartyMelee2 = makeIcon(Job.RoleMelee2);
+
 export const PartyRanged = makeIcon(Job.RoleRanged);
+export const PartyRanged1 = makeIcon(Job.RoleRanged1);
+export const PartyRanged2 = makeIcon(Job.RoleRanged2);
 export const PartyMagicRanged = makeIcon(Job.RoleMagicRanged);
 export const PartyPhysicalRanged = makeIcon(Job.RolePhysicalRanged);
 
@@ -146,3 +158,26 @@ export const PartyRedMage = makeIcon(Job.RedMage);
 export const PartyPictomancer = makeIcon(Job.Pictomancer);
 
 export const PartyBlueMage = makeIcon(Job.BlueMage);
+export const PartyBeastmaster = makeIcon(Job.Beastmaster);
+
+export const PartyGladiator = makeIcon(Job.Gladiator);
+export const PartyMarauder = makeIcon(Job.Marauder);
+export const PartyConjurer = makeIcon(Job.Conjurer);
+export const PartyPugilist = makeIcon(Job.Pugilist);
+export const PartyLancer = makeIcon(Job.Lancer);
+export const PartyRogue = makeIcon(Job.Rogue);
+export const PartyThaumaturge = makeIcon(Job.Thaumaturge);
+export const PartyArcanist = makeIcon(Job.Arcanist);
+export const PartyArcher = makeIcon(Job.Archer);
+
+export const PartyCarpenter = makeIcon(Job.Carpenter);
+export const PartyBlacksmith = makeIcon(Job.Blacksmith);
+export const PartyArmorer = makeIcon(Job.Armorer);
+export const PartyGoldsmith = makeIcon(Job.Goldsmith);
+export const PartyLeatherworker = makeIcon(Job.Leatherworker);
+export const PartyWeaver = makeIcon(Job.Weaver);
+export const PartyAlchemist = makeIcon(Job.Alchemist);
+export const PartyCulinarian = makeIcon(Job.Culinarian);
+export const PartyMiner = makeIcon(Job.Miner);
+export const PartyBotanist = makeIcon(Job.Botanist);
+export const PartyFisher = makeIcon(Job.Fisher);

@@ -1,9 +1,9 @@
-import { useContext } from 'react';
-import { EditModeContext, EditModeState } from './EditModeContext';
+import { use } from 'react';
+import { EditModeContext, type EditModeState } from './EditModeContext';
 import { EditMode } from './editMode';
 
 export function useEditMode(): EditModeState {
-    return useContext(EditModeContext);
+    return use(EditModeContext);
 }
 
 export function useCancelConnectionSelection(): () => void {

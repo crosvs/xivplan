@@ -12,7 +12,6 @@ import React from 'react';
 import { useScene } from '../SceneProvider';
 import { Segment, SegmentedGroup } from '../Segmented';
 import { SpinButton } from '../SpinButton';
-import { useSpinChanged } from '../prefabs/useSpinChanged';
 import { ArenaShape } from '../scene';
 import { useControlStyles } from '../useControlStyles';
 
@@ -22,12 +21,12 @@ const BorderNoneIcon = bundleIcon(BorderNoneFilled, BorderNoneRegular);
 
 export const ArenaShapeEdit: React.FC = () => {
     const classes = useControlStyles();
-    const { scene, dispatch } = useScene();
-    const { shape, width, height, padding } = scene.arena;
+    const { arena, dispatch } = useScene();
+    const { shape, width, height, padding } = arena;
 
-    const onWidthChanged = useSpinChanged((value) => dispatch({ type: 'arenaWidth', value }));
-    const onHeightChanged = useSpinChanged((value) => dispatch({ type: 'arenaHeight', value }));
-    const onPaddingChanged = useSpinChanged((value) => dispatch({ type: 'arenaPadding', value }));
+    const onWidthChanged = (value: number) => dispatch({ type: 'updateArena', value: { width: value } });
+    const onHeightChanged = (value: number) => dispatch({ type: 'updateArena', value: { height: value } });
+    const onPaddingChanged = (value: number) => dispatch({ type: 'updateArena', value: { padding: value } });
 
     return (
         <div className={classes.column}>
@@ -36,7 +35,9 @@ export const ArenaShapeEdit: React.FC = () => {
                     <SegmentedGroup
                         name="arena-shape"
                         value={shape}
-                        onChange={(ev, data) => dispatch({ type: 'arenaShape', value: data.value as ArenaShape })}
+                        onChange={(ev, data) =>
+                            dispatch({ type: 'updateArena', value: { shape: data.value as ArenaShape } })
+                        }
                     >
                         <Segment value={ArenaShape.None} icon={<BorderNoneIcon />} title="None" />
                         <Segment value={ArenaShape.Circle} icon={<CircleIcon />} title="Circle" />
@@ -44,15 +45,15 @@ export const ArenaShapeEdit: React.FC = () => {
                     </SegmentedGroup>
                 </Field>
                 <Field label="Padding" className={classes.cell}>
-                    <SpinButton min={0} max={500} step={10} value={padding} onChange={onPaddingChanged} />
+                    <SpinButton min={0} max={500} step={10} value={padding} onValueChange={onPaddingChanged} />
                 </Field>
             </div>
             <div className={classes.row}>
                 <Field label="Width">
-                    <SpinButton min={50} max={2000} step={50} value={width} onChange={onWidthChanged} />
+                    <SpinButton min={50} max={2000} step={50} value={width} onValueChange={onWidthChanged} />
                 </Field>
                 <Field label="Height">
-                    <SpinButton min={50} max={2000} step={50} value={height} onChange={onHeightChanged} />
+                    <SpinButton min={50} max={2000} step={50} value={height} onValueChange={onHeightChanged} />
                 </Field>
             </div>
         </div>

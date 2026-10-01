@@ -9,7 +9,7 @@ import {
     tokens,
     useToastController,
 } from '@fluentui/react-components';
-import React, { PropsWithChildren, Suspense, useEffect } from 'react';
+import React, { type PropsWithChildren, Suspense, useEffect } from 'react';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import {
     createBrowserRouter,

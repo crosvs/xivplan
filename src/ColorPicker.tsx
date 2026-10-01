@@ -2,9 +2,9 @@ import { Field, makeStyles, mergeClasses, tokens } from '@fluentui/react-compone
 import Hue from '@uiw/react-color-hue';
 import Saturation from '@uiw/react-color-saturation';
 import Color from 'colorjs.io';
-import React, { HTMLAttributes, useState } from 'react';
+import React, { type HTMLAttributes, useState } from 'react';
 import { SpinButton } from './SpinButton';
-import { HsvaColor, RgbColor, colorToHsva, hsvToHex, hsvToRgb, rgbToHsva } from './color';
+import { type HsvaColor, type RgbColor, colorToHsva, hsvToHex, hsvToRgb, rgbToHsva } from './color';
 
 export interface ColorPickerProps {
     className?: string;
@@ -16,7 +16,7 @@ const BLACK: HsvaColor = { h: 0, s: 0, v: 0, a: 1 };
 
 export const ColorPicker: React.FC<ColorPickerProps> = ({ className, value, onChange }) => {
     const classes = useStyles();
-    const [color, setColor] = useState<HsvaColor>(parseColorHsva(value) ?? BLACK);
+    const [color, setColor] = useState<HsvaColor>(() => parseColorHsva(value) ?? BLACK);
     const rgb = hsvToRgb(color);
 
     const onSaturationChange = (data: HsvaColor) => {

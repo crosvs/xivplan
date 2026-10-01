@@ -1,24 +1,16 @@
 import { use, useMemo } from 'react';
-import { CrossStepContext, CrossStepContextValue, SimilarityFilters } from './CrossStepContext';
+import { CrossStepContext, type CrossStepContextValue, type SimilarityFilters } from './CrossStepContext';
 import { useScene } from './SceneProvider';
 import {
     DragSelectionContext,
-    SceneSelection,
+    type SceneSelection,
     SelectionContext,
-    SelectionState,
+    type SelectionState,
     SpotlightContext,
 } from './SelectionContext';
-import {
-    isColored,
-    isImageObject,
-    isMoveable,
-    isRadiusObject,
-    isResizable,
-    ObjectType,
-    Scene,
-    SceneObject,
-    SceneStep,
-} from './scene';
+import { getAbsoluteRotationInStep } from './coord';
+import { isMoveable, isRotateable, isTether, type Scene, type SceneObject, type SceneStep } from './scene';
+import { mod360 } from './util';
 
 /**
  * State for selected objects.
@@ -180,70 +172,126 @@ export function useEditableObjects(): readonly SceneObject[] {
     );
 }
 
-interface ObjectSimilarityKey {
-    type: ObjectType;
-    width?: number;
-    height?: number;
-    radius?: number;
-    color?: string;
-    image?: string;
-    hide?: boolean;
+/**
+ * Fields that describe an object's identity, placement, or relationships rather than its size and
+ * shape, so the "Size & Shape" filter ignores them. Placement and relationships have their own
+ * filters (position, rotation, linked to).
+ */
+const NON_SHAPE_FIELDS: ReadonlySet<string> = new Set([
+    'id',
+    'type',
+    'trackId',
+    'animation',
+    'opacity',
+    'pinned',
+    'name',
+    'text',
+    'x',
+    'y',
+    'rotation',
+    'positionParentId',
+    'facingId',
+    'facingOffset',
+    'startId',
+    'endId',
+]);
+
+type ShapeValue = string | number | boolean;
+
+/**
+ * Gets the scalar size/shape/style fields of an object, e.g. width, height, radius, length, color,
+ * tether style, arrowheads, or hollow. Every scalar field not in NON_SHAPE_FIELDS is included, so
+ * object-specific settings are compared without having to list them for each object type.
+ */
+function getShapeFields(obj: SceneObject): Map<string, ShapeValue> {
+    const fields = new Map<string, ShapeValue>();
+    for (const [key, value] of Object.entries(obj)) {
+        if (NON_SHAPE_FIELDS.has(key)) continue;
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            fields.set(key, value);
+        }
+    }
+    return fields;
 }
 
-function getObjectSimilarityKey(obj: SceneObject): ObjectSimilarityKey {
-    return {
-        type: obj.type,
-        width: isResizable(obj) ? obj.width : undefined,
-        height: isResizable(obj) ? obj.height : undefined,
-        radius: isRadiusObject(obj) ? obj.radius : undefined,
-        color: isColored(obj) ? obj.color : undefined,
-        image: isImageObject(obj) ? obj.image : undefined,
-        hide: obj.hide ?? false,
-    };
+/** A missing optional field is treated the same as `false`, e.g. `hide`, `hollow`, or `arrowBegin`. */
+function shapeFieldValue(fields: ReadonlyMap<string, ShapeValue>, key: string): ShapeValue {
+    return fields.get(key) ?? false;
 }
 
-function getTemplateSimilarityKey(objects: readonly SceneObject[]): ObjectSimilarityKey | null {
-    if (!objects.length) return null;
-    const first = objects[0]!;
-    if (!objects.every((o) => o.type === first.type)) return null;
+/**
+ * Gets the shape fields that all of the given objects agree on. Fields the objects disagree on are
+ * left out, so they don't restrict which objects are considered similar.
+ */
+function getTemplateShapeKey(objects: readonly SceneObject[]): ReadonlyMap<string, ShapeValue> | null {
+    const first = objects[0];
+    if (!first || !objects.every((o) => o.type === first.type)) return null;
 
-    const keys = objects.map(getObjectSimilarityKey);
-    const firstKey = keys[0]!;
+    const allFields = objects.map(getShapeFields);
+    const keys = new Set(allFields.flatMap((fields) => [...fields.keys()]));
+    const firstFields = allFields[0]!;
 
-    return {
-        type: first.type,
-        width: keys.every((k) => k.width === firstKey.width) ? firstKey.width : undefined,
-        height: keys.every((k) => k.height === firstKey.height) ? firstKey.height : undefined,
-        radius: keys.every((k) => k.radius === firstKey.radius) ? firstKey.radius : undefined,
-        color: keys.every((k) => k.color === firstKey.color) ? firstKey.color : undefined,
-        image: keys.every((k) => k.image === firstKey.image) ? firstKey.image : undefined,
-        hide: keys.every((k) => k.hide === firstKey.hide) ? firstKey.hide : undefined,
-    };
+    const key = new Map<string, ShapeValue>();
+    for (const k of keys) {
+        const value = shapeFieldValue(firstFields, k);
+        if (allFields.every((fields) => shapeFieldValue(fields, k) === value)) {
+            key.set(k, value);
+        }
+    }
+    return key;
 }
 
-function matchesSimilarityKey(obj: SceneObject, key: ObjectSimilarityKey): boolean {
-    if (obj.type !== key.type) return false;
-    const objKey = getObjectSimilarityKey(obj);
-    if (key.width !== undefined && objKey.width !== key.width) return false;
-    if (key.height !== undefined && objKey.height !== key.height) return false;
-    if (key.radius !== undefined && objKey.radius !== key.radius) return false;
-    if (key.color !== undefined && objKey.color !== key.color) return false;
-    if (key.image !== undefined && objKey.image !== key.image) return false;
-    if (key.hide !== undefined && objKey.hide !== key.hide) return false;
+function matchesShapeKey(obj: SceneObject, key: ReadonlyMap<string, ShapeValue>): boolean {
+    const fields = getShapeFields(obj);
+    for (const [k, value] of key) {
+        if (shapeFieldValue(fields, k) !== value) return false;
+    }
     return true;
 }
 
-export interface AvailableFilters {
-    trackId: boolean;
-    properties: boolean;
-    position: boolean;
+/** Gets the IDs of every object this object is linked to: tether ends, position parent, and facing target. */
+function getLinkTargets(obj: SceneObject): number[] {
+    const targets: number[] = [];
+    if (isTether(obj)) {
+        targets.push(obj.startId, obj.endId);
+    }
+    if (isMoveable(obj) && obj.positionParentId !== undefined) {
+        targets.push(obj.positionParentId);
+    }
+    if (isRotateable(obj) && obj.facingId !== undefined) {
+        targets.push(obj.facingId);
+    }
+    return targets;
 }
+
+/** Absolute rotation of an object within its own step, or undefined if it can't be rotated. */
+function getStepRotation(step: SceneStep, obj: SceneObject): number | undefined {
+    return isRotateable(obj) && isMoveable(obj) ? getAbsoluteRotationInStep(step, obj) : undefined;
+}
+
+/** Smallest difference between two angles in degrees, in the range [0, 180]. */
+function angleDifference(a: number, b: number): number {
+    const diff = Math.abs(mod360(a) - mod360(b));
+    return Math.min(diff, 360 - diff);
+}
+
+export type AvailableFilters = SimilarityFilters;
+
+const NO_FILTERS_AVAILABLE: AvailableFilters = {
+    trackId: false,
+    properties: false,
+    position: false,
+    rotation: false,
+    linkedTo: false,
+};
 
 /**
  * Returns which filter pills are applicable for the current selection.
  * trackId: any selected object has a trackId.
  * properties: all selected objects share the same type.
  * position: same as properties and at least one selected object is moveable.
+ * rotation: same as properties and at least one selected object is rotateable.
+ * linkedTo: same as properties and at least one selected object is linked to another object.
  */
 export function useAvailableFilters(): AvailableFilters {
     const { step } = useScene();
@@ -251,7 +299,7 @@ export function useAvailableFilters(): AvailableFilters {
 
     return useMemo(() => {
         const selected = getSelectedObjects(step, selection);
-        if (!selected.length) return { trackId: false, properties: false, position: false };
+        if (!selected.length) return NO_FILTERS_AVAILABLE;
 
         const firstType = selected[0]!.type;
         const homogeneous = selected.every((o) => o.type === firstType);
@@ -260,8 +308,17 @@ export function useAvailableFilters(): AvailableFilters {
             trackId: selected.some((o) => Boolean(o.trackId)),
             properties: homogeneous,
             position: homogeneous && selected.some(isMoveable),
+            rotation: homogeneous && selected.some((o) => getStepRotation(step, o) !== undefined),
+            linkedTo: homogeneous && selected.some((o) => getLinkTargets(o).length > 0),
         };
     }, [step, selection]);
+}
+
+export interface SimilarityTolerances {
+    /** Maximum distance in X and Y for the position filter. */
+    position: number;
+    /** Maximum difference in degrees for the rotation filter. */
+    rotation: number;
 }
 
 /**
@@ -275,14 +332,23 @@ export function useAvailableFilters(): AvailableFilters {
  */
 export function useSimilarObjects(
     filters: SimilarityFilters,
-    positionTolerance = 0,
+    tolerances: SimilarityTolerances,
 ): ReadonlyMap<number, ReadonlySet<number>> {
     const { canonicalScene, stepIndex } = useScene();
     const [selection] = useSelection();
-    const { trackId: filterTrackId, properties: filterProperties, position: filterPosition } = filters;
+    const {
+        trackId: filterTrackId,
+        properties: filterProperties,
+        position: filterPosition,
+        rotation: filterRotation,
+        linkedTo: filterLinkedTo,
+    } = filters;
+    const { position: positionTolerance, rotation: rotationTolerance } = tolerances;
 
     return useMemo(() => {
-        if (!filterTrackId && !filterProperties && !filterPosition) return new Map();
+        if (!filterTrackId && !filterProperties && !filterPosition && !filterRotation && !filterLinkedTo) {
+            return new Map();
+        }
 
         const step = canonicalScene.steps[stepIndex];
         if (!step) return new Map();
@@ -298,18 +364,46 @@ export function useSimilarObjects(
             : null;
         if (filterTrackId && (!trackIds || !trackIds.size)) return new Map();
 
-        const propKey = filterProperties ? getTemplateSimilarityKey(selectedObjects) : null;
-        if (filterProperties && !propKey) return new Map();
+        const shapeKey = filterProperties ? getTemplateShapeKey(selectedObjects) : null;
+        if (filterProperties && !shapeKey) return new Map();
 
         const moveableTemplates = filterPosition ? selectedObjects.filter(isMoveable) : null;
+
+        const templateRotations = filterRotation
+            ? selectedObjects.map((o) => getStepRotation(step, o)).filter((r) => r !== undefined)
+            : null;
+
+        // Objects on other steps are copies with different IDs, so a link target is recognized
+        // there by its trackId. Targets without one can only be matched on the current step.
+        const linkTargetIds = filterLinkedTo ? new Set(selectedObjects.flatMap(getLinkTargets)) : null;
+        const linkTargetTrackIds = linkTargetIds
+            ? new Set(
+                  step.objects
+                      .filter((o) => linkTargetIds.has(o.id))
+                      .map((o) => o.trackId)
+                      .filter((id): id is string => Boolean(id)),
+              )
+            : null;
 
         const result = new Map<number, Set<number>>();
 
         canonicalScene.steps.forEach((s, stepIdx) => {
+            let stepLinkTargets: ReadonlySet<number> | null = null;
+            if (linkTargetIds && linkTargetTrackIds) {
+                stepLinkTargets =
+                    stepIdx === stepIndex
+                        ? linkTargetIds
+                        : new Set(
+                              s.objects
+                                  .filter((o) => o.trackId !== undefined && linkTargetTrackIds.has(o.trackId))
+                                  .map((o) => o.id),
+                          );
+            }
+
             const matches = s.objects.filter((o) => {
                 if (o.type !== firstType) return false;
                 if (trackIds !== null && (!o.trackId || !trackIds.has(o.trackId))) return false;
-                if (propKey !== null && !matchesSimilarityKey(o, propKey)) return false;
+                if (shapeKey !== null && !matchesShapeKey(o, shapeKey)) return false;
                 if (moveableTemplates !== null) {
                     if (!isMoveable(o)) return false;
                     if (
@@ -319,6 +413,14 @@ export function useSimilarObjects(
                     )
                         return false;
                 }
+                if (templateRotations !== null) {
+                    const rotation = getStepRotation(s, o);
+                    if (rotation === undefined) return false;
+                    if (!templateRotations.some((t) => angleDifference(rotation, t) <= rotationTolerance)) return false;
+                }
+                if (stepLinkTargets !== null && !getLinkTargets(o).some((id) => stepLinkTargets.has(id))) {
+                    return false;
+                }
                 return true;
             });
             if (matches.length) {
@@ -327,5 +429,16 @@ export function useSimilarObjects(
         });
 
         return result;
-    }, [canonicalScene, stepIndex, selection, filterTrackId, filterProperties, filterPosition, positionTolerance]);
+    }, [
+        canonicalScene,
+        stepIndex,
+        selection,
+        filterTrackId,
+        filterProperties,
+        filterPosition,
+        filterRotation,
+        filterLinkedTo,
+        positionTolerance,
+        rotationTolerance,
+    ]);
 }

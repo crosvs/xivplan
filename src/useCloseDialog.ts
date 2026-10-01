@@ -1,6 +1,6 @@
-import { useContext } from 'react';
+import { use } from 'react';
 
-import { Dispatch, SetStateAction, createContext } from 'react';
+import { type Dispatch, type SetStateAction, createContext } from 'react';
 
 export type DialogOpenState = Dispatch<SetStateAction<boolean>>;
 
@@ -31,7 +31,7 @@ export const DialogOpenContext = createContext<DialogOpenState>(() => {});
  * ```
  */
 export function useCloseDialog() {
-    const setOpen = useContext(DialogOpenContext);
+    const setOpen = use(DialogOpenContext);
 
     return () => setOpen(false);
 }

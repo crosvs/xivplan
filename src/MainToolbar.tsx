@@ -1,6 +1,6 @@
 import {
     Menu,
-    MenuButtonProps,
+    type MenuButtonProps,
     MenuItem,
     MenuList,
     MenuPopover,
@@ -21,11 +21,11 @@ import {
     SaveEditRegular,
     SaveRegular,
 } from '@fluentui/react-icons';
-import React, { ReactElement, useContext, useRef, useState } from 'react';
+import React, { type ReactElement, use, useRef, useState } from 'react';
 import { InPortal } from 'react-reverse-portal';
 import { CollapsableSplitButton, CollapsableToolbarButton } from './CollapsableToolbarButton';
 import { useHeaderCollapseState } from './headerStages';
-import { FileSource, useScene, useSceneUndoRedoPossible, useSetSource } from './SceneProvider';
+import { type FileSource, useScene, useSceneUndoRedoPossible, useSetSource } from './SceneProvider';
 import { ScreenshotHotkeyHandler } from './StepScreenshotButton';
 import { ToolbarContext } from './ToolbarContext';
 import { saveFile } from './file';
@@ -53,7 +53,7 @@ const useStyles = makeStyles({
 
 export const MainToolbar: React.FC = () => {
     const classes = useStyles();
-    const toolbarNode = useContext(ToolbarContext);
+    const toolbarNode = use(ToolbarContext);
     const { dispatch } = useScene();
     const [undoPossible, redoPossible] = useSceneUndoRedoPossible();
     const [openFileOpen, setOpenFileOpen] = useState(false);

@@ -1,19 +1,27 @@
 import Konva from 'konva';
-import { KonvaEventObject } from 'konva/lib/Node';
-import { Vector2d } from 'konva/lib/types';
-import React, { PropsWithChildren, RefAttributes, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import type { KonvaEventObject } from 'konva/lib/Node';
+import type { Vector2d } from 'konva/lib/types';
+import React, {
+    type PropsWithChildren,
+    type RefAttributes,
+    use,
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+} from 'react';
 import { Layer, Stage } from 'react-konva';
 import { DefaultCursorProvider } from '../DefaultCursorProvider';
 import { getDropAction } from '../DropHandler';
 import { SceneHotkeyHandler } from '../HotkeyHandler';
-import { EditorState, SceneAction, SceneContext, useCurrentStep, useScene } from '../SceneProvider';
-import { SelectionContext, SelectionState, SpotlightContext } from '../SelectionContext';
+import { type EditorState, type SceneAction, SceneContext, useCurrentStep, useScene } from '../SceneProvider';
+import { SelectionContext, type SelectionState, SpotlightContext } from '../SelectionContext';
 import { getCanvasSize, getSceneCoord } from '../coord';
 import { EditMode } from '../editMode';
-import { Scene } from '../scene';
+import type { Arena, Scene } from '../scene';
 import { selectNewObjects, selectNone, useCrossStepSelection, useSelection } from '../selection';
-import { UndoContext } from '../undo/undoContext';
-import { CONTROL_POINT_NAME } from '../prefabs/ControlPoint';
+import type { UndoContext } from '../undo/undoContext';
+import { CONTROL_POINT_NAME } from '../prefabs/controlpoints';
 import { SELECTABLE_OBJECT_NAME } from '../prefabs/SelectableObject';
 import { TOUCH_MOVE_SLOP } from '../touchTuning';
 import { useEditMode } from '../useEditMode';
@@ -21,7 +29,7 @@ import { useElementSize } from '../useElementSize';
 import { usePanelDrag } from '../usePanelDrag';
 import { usePreviewMode } from '../usePreviewMode';
 import { clamp } from '../util';
-import { MAX_ZOOM, MIN_ZOOM, ViewTransform } from '../ViewTransformContext';
+import { MAX_ZOOM, MIN_ZOOM, type ViewTransform } from '../ViewTransformContext';
 import { useViewTransform } from '../useViewTransform';
 import { StaticPlaybackProvider, useDisplayObjects, useOptionalPlayback } from '../playback/PlaybackContext';
 import { ArenaRenderer } from './ArenaRenderer';
@@ -98,10 +106,10 @@ function zoomAroundPoint(transform: ViewTransform, point: Vector2d, newScale: nu
 }
 
 export const SceneRenderer: React.FC = () => {
-    const { scene } = useScene();
-    const [, setSelection] = useContext(SelectionContext);
+    const { arena } = useScene();
+    const [, setSelection] = use(SelectionContext);
     const { setSelection: setCrossStep } = useCrossStepSelection();
-    const arenaSize = getCanvasSize(scene);
+    const arenaSize = getCanvasSize(arena);
     const containerRef = useRef<HTMLDivElement>(null);
     const { width: containerWidth, height: containerHeight } = useElementSize(containerRef);
     const [stage, stageRef] = useState<Konva.Stage | null>(null);
@@ -158,8 +166,9 @@ export const SceneRenderer: React.FC = () => {
     };
 
     const onClickStage = (e: KonvaEventObject<MouseEvent>) => {
-        // Clicking on nothing (with no modifier keys held) should cancel all selections.
-        if (!e.evt.ctrlKey && !e.evt.shiftKey) {
+        // Clicking on nothing (with no modifier keys held) should cancel all selections. The middle button only
+        // pans the canvas, so releasing it after a pan shouldn't clear the selection.
+        if (e.evt.button !== 1 && !e.evt.ctrlKey && !e.evt.shiftKey) {
             deselectAll();
         }
     };
@@ -325,6 +334,7 @@ export const SceneRenderer: React.FC = () => {
 
 export interface ScenePreviewProps extends RefAttributes<Konva.Stage> {
     scene: Scene;
+    arena: Arena;
     stepIndex?: number;
     /** Fractional playback time (0 to steps.length-1). Overrides stepIndex for interpolated previews. */
     playbackTime?: number;
@@ -349,6 +359,7 @@ export interface ScenePreviewProps extends RefAttributes<Konva.Stage> {
 export const ScenePreview: React.FC<ScenePreviewProps> = ({
     ref,
     scene,
+    arena,
     stepIndex,
     playbackTime,
     pulseTime,
@@ -372,7 +383,7 @@ export const ScenePreview: React.FC<ScenePreviewProps> = ({
         [ref, previewPixelRatio],
     );
 
-    const size = getCanvasSize(scene);
+    const size = getCanvasSize(arena);
     let scale = 1;
     let x = 0;
     let y = 0;
@@ -510,7 +521,7 @@ interface DropTargetProps extends PropsWithChildren {
 }
 
 const DropTarget: React.FC<DropTargetProps> = ({ stage, children }) => {
-    const { scene, dispatch } = useScene();
+    const { scene, arena, dispatch } = useScene();
     const [, setSelection] = useSelection();
     const [dragObject, setDragObject] = usePanelDrag();
 
@@ -534,7 +545,7 @@ const DropTarget: React.FC<DropTargetProps> = ({ stage, children }) => {
         position.x -= dragObject.offset.x / stage.scaleX();
         position.y -= dragObject.offset.y / stage.scaleY();
 
-        const action = getDropAction(dragObject, getSceneCoord(scene, position));
+        const action = getDropAction(dragObject, getSceneCoord(scene, arena, position));
         if (action) {
             dispatch(action);
             setSelection(selectNewObjects(scene, 1));

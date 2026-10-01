@@ -2,7 +2,7 @@ import React, { memo } from 'react';
 import { Group } from 'react-konva';
 import { usePulseTime } from '../playback/PlaybackContext';
 import { ObjectContext } from '../prefabs/ObjectContext';
-import { PulseStyle, SceneObject } from '../scene';
+import { type PulseStyle, type SceneObject } from '../scene';
 import { LayerName } from './layers';
 import { getLayerName, getRenderer } from './ObjectRegistry';
 

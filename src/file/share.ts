@@ -2,7 +2,7 @@ import { use, useEffect } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { jsonToScene, sceneToText, textToScene } from '../file';
 import type { FileSource } from '../SceneProvider';
-import { Scene } from '../scene';
+import type { Scene } from '../scene';
 import {
     decodeNostrUrlSegments,
     getNostrFetchedName,
@@ -149,6 +149,6 @@ export function useSourceFromUrl(): FileSource | undefined {
     return undefined;
 }
 
-export function useSceneLoadError(): Error | string | unknown | undefined {
+export function getSceneLoadError(): Error | string | unknown | undefined {
     return sceneError ?? getNostrFetchError();
 }
