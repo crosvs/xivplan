@@ -1,14 +1,12 @@
 import React from 'react';
 import { Circle, Group } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
 import Icon from '../../assets/zone/knockback.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { CircleZone, ObjectType } from '../../scene';
+import { type CircleZone, type ObjectPrototype, ObjectType } from '../../scene';
 import { CENTER_DOT_RADIUS, DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { RadiusObjectContainer } from '../RadiusObjectContainer';
@@ -19,37 +17,15 @@ import { getArrowStyle, getZoneStyle } from './style';
 const DEFAULT_RADIUS = 150;
 
 export const ZoneKnockback: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-    return (
-        <PrefabIcon
-            draggable
-            name="Circular knockback"
-            icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Knockback,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<CircleZone>(ObjectType.Knockback, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Knockback,
-            color: DEFAULT_AOE_COLOR,
-            opacity: DEFAULT_AOE_OPACITY,
-            radius: DEFAULT_RADIUS,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<CircleZone> = {
+        type: ObjectType.Knockback,
+        color: DEFAULT_AOE_COLOR,
+        opacity: DEFAULT_AOE_OPACITY,
+        radius: DEFAULT_RADIUS,
     };
-});
+
+    return <PrefabIcon name="Circular knockback" icon={<Icon />} object={object} renderDrag />;
+};
 
 const CHEVRON_ANGLES = Array.from({ length: 16 }).map((_, i) => (i * 360) / 16);
 
@@ -64,10 +40,10 @@ const KnockbackRenderer: React.FC<KnockbackRendererProps> = ({ object, radius, i
     const ring = getZoneStyle(object.color, object.opacity, radius * 2);
     const arrow = getArrowStyle(object.color, object.opacity * 3);
 
-    const cx = radius;
-    const cw = radius * 0.24;
-    const ch = radius * 0.12;
-    const ca = 40;
+    const chevronOffset = radius;
+    const chevronWidth = radius * 0.24;
+    const chevronThickness = radius * 0.042;
+    const chevronAngle = 40;
 
     return (
         <>
@@ -83,10 +59,12 @@ const KnockbackRenderer: React.FC<KnockbackRendererProps> = ({ object, radius, i
                         {[0.25, 0.52, 0.85].map((s, j) => (
                             <ChevronTail
                                 key={j}
-                                offsetY={cx * s}
-                                chevronAngle={ca}
-                                width={cw * s}
-                                height={ch * s}
+                                offsetY={chevronOffset * s}
+                                chevronAngle={chevronAngle}
+                                width={chevronWidth * s}
+                                thickness={chevronThickness * s}
+                                tailGap={chevronThickness * s * 0.4}
+                                tailThickness={chevronThickness * s * 1.75}
                                 opacity={object.opacity / 100}
                                 {...arrow}
                             />

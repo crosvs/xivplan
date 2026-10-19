@@ -2,6 +2,89 @@
 
 This page tracks notable changes made to XIVPlan. Not every change will be listed here.
 
+## Sep 26, 2026
+
+- When dragging an object from the left panel onto the scene, the drag preview will now match the object to be created instead of the icon from the panel.
+
+## Sep 20, 2026
+
+- Added support for indicating that a stack AOE hits multiple times.
+- Fixed an issue where arrow patterns in stack and knockback zones did not always appear in screenshots.
+
+## Sep 13, 2026
+
+- Added support for adjusting the size of the indicator in the center of a proximity AOE.
+- Updated various toggle button controls for improved consistency.
+
+## Aug 29, 2026
+
+- Added class icons for party objects.
+
+## Aug 17, 2026
+
+- Added a ground-targeted version of proximity AOEs.
+  - Also added support for rotating the center icon in preparation for importing strategy board links.
+- Look away/towards objects can now be rotated as well.
+
+## Aug 9, 2026
+
+- Added an option to display an icon in the center of enemy objects. There are three icon styles (taken from the strategy board image set).
+- Added an option to hide the enemy hitbox ring.
+- Updated some enemy ring styles to have flank arrows.
+- Fixed an issue where segmented controls (e.g. waymark shape, enemy ring style, etc.) would show the last-active value when selecting multiple objects with different values.
+
+## July 23, 2026
+
+- Added modifier keys when adjusting line/cone control points:
+  - `Shift` prevents changes to the rotation of the object.
+  - `Ctrl` prevents changes to the length/radius of the object.
+  - `Alt` disables snapping to nearby 15 degree increments.
+- Reworked resizing of rectangular objects and changed the modifier keys:
+  - `Shift` to enable proportional resize now works on edge handles as well as corners.
+  - `Shift` now disables proportional resize on objects that are proportional by default.
+  - The key to resize symmetrically about the object's center changed from `Alt` to `Ctrl`.
+  - Fixed an issue where dragging a resize handle to the opposite side of the object caused its position to migrate such that it was different after returning the handle to its original position.
+- Added an option to make the screenshot padding area transparent.
+
+## June 20, 2026
+
+- Added a way to override the arena settings for individual steps, making it easier to make plans for mechanics where the arena changes.
+- Added a new arena preset for Arcadion M12. Updated an existing M12 preset to have more horizontal padding so it lines up with the new preset if you use both in one plan.
+
+## June 7, 2026
+
+- Changed arrow, line stack, and line knock away objects to have an origin position, direction, length, and width instead of being a rectangle centered on the position.
+- Changed line stack, line knockback, and line knock away objects to have an option to show or hide the background fill.
+- Adjusted the default appearance for arrows from red to white and with shorter length.
+
+## June 6, 2026
+
+- Added some new target indicator icons.
+- Updated the share dialog to provide some other workarounds for very large share links.
+
+## May 29, 2026
+
+- Made the objects and icons panels fully keyboard accessible. Objects can now be focused, and pressing `Enter` now creates the focused object in the center of the arena.
+- Double clicking an object now creates it in the center of the arena.
+
+## May 23, 2026
+
+- Added numbered role icons, the pure/barrier healer icons, & the Beastmaster icon.
+- Split the icons UI into two tabs to support the new icons.
+
+## May 22, 2026
+
+- On supported browsers (just Chromium-based browsers I think), objects can now be copied from one tab and pasted into another.
+- Fixed an issue where eye objects didn't redraw when hiding/unhiding or toggling look toward/away.
+
+## May 18, 2026
+
+- Switched party icons to new images based on the strategy board.
+
+## April 6, 2026
+
+- Added another arena preset for Arcadion M12.
+
 ## March 23, 2026
 
 - Added a playback mode with a timeline slider, play/pause controls, and speed selector.
@@ -11,7 +94,7 @@ This page tracks notable changes made to XIVPlan. Not every change will be liste
 - Added pulse/blink effects that animate continuously during playback: Pulse, Blink. (Snapshot, and Highlight effects planned)
 - Added a video export button that renders the playback animation to a 60 FPS WebM file, with options for speed and resolution.
 
-## March 14
+## March 14, 2026
 
 - Added arena preset for Arcadion M12.
 

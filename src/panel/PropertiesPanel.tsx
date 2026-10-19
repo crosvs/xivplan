@@ -1,11 +1,12 @@
 import { Button, mergeClasses, Text } from '@fluentui/react-components';
-import React from 'react';
+import React, { useState } from 'react';
 import { ConnectionType } from '../EditModeContext';
 import { useCrossStepSelection, useEditableObjects } from '../selection';
 import { EditMode } from '../editMode';
 import {
-    SceneObject,
-    UnknownObject,
+    type SceneObject,
+    type UnknownObject,
+    hasLineProperties,
     isArcZone,
     isArrow,
     isColored,
@@ -17,12 +18,12 @@ import {
     isIcon,
     isImageObject,
     isInnerRadiusObject,
-    isLineZone,
     isMarker,
     isMoveable,
     isNamed,
     isParty,
     isPolygonZone,
+    isProximityZone,
     isRadiusObject,
     isResizable,
     isRotateable,
@@ -30,18 +31,20 @@ import {
     isTether,
     isText,
     supportsHollow,
+    supportsMultiHit,
     supportsStackCount,
 } from '../scene';
 import { useSelection } from '../selection';
 import { useConnectionSelection } from '../useConnectionSelection';
 import { useControlStyles } from '../useControlStyles';
 import { useEditMode } from '../useEditMode';
-import { PropertiesControlProps } from './PropertiesControl';
+import { PartyTabContext, type PartyTabs } from './PartyTabContext';
+import type { PropertiesControlProps } from './PropertiesControl';
 import { ArrowPointersControl } from './properties/ArrowControls';
 import { DrawObjectBrushControl } from './properties/BrushControl';
 import { ColorControl, ColorSwatchControl } from './properties/ColorControl';
 import { ConeAngleControl } from './properties/ConeControls';
-import { EnemyRingControl } from './properties/EnemyControls';
+import { EnemyControl } from './properties/EnemyControls';
 import { ExaflareLengthControl, ExaflareSpacingControl } from './properties/ExaflareControls';
 import { EyeInvertControl } from './properties/EyeControls';
 import { HideControl } from './properties/HideControl';
@@ -55,10 +58,11 @@ import { OpacityControl } from './properties/OpacityControl';
 import { PartyIconControl } from './properties/PartyControls';
 import { PolygonOrientationControl, PolygonSidesControl } from './properties/PolygonControls';
 import { PositionControl } from './properties/PositionControl';
+import { ProximityScaleControl, ProximityTypeControl } from './properties/ProximityControls';
 import { InnerRadiusControl, RadiusControl } from './properties/RadiusControl';
 import { RotationControl } from './properties/RotationControl';
 import { SizeControl } from './properties/SizeControl';
-import { StackCountControl } from './properties/StackCountControl';
+import { StackCountControl, StackMultiHitControl } from './properties/StackControls';
 import { StarburstSpokeCountControl, StarburstSpokeWidthControl } from './properties/StarburstControls';
 import { TetherTypeControl, TetherWidthControl } from './properties/TetherControls';
 import { TextLayoutControl, TextOutlineControl, TextValueControl } from './properties/TextControls';
@@ -71,10 +75,13 @@ export interface PropertiesPanelProps {
 
 export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ className }) => {
     const classes = useControlStyles();
+    const partyTabState = useState<PartyTabs>('roles');
 
     return (
         <div className={mergeClasses(classes.panel, classes.column, className)}>
-            <Controls />
+            <PartyTabContext value={partyTabState}>
+                <Controls />
+            </PartyTabContext>
         </div>
     );
 };
@@ -176,7 +183,7 @@ const Controls: React.FC = () => {
             {/* Position/Size */}
             <ControlCondition objects={objects} test={isMoveable} control={PositionControl} />
             <ControlCondition objects={objects} test={isResizable} control={SizeControl} />
-            <ControlCondition objects={objects} test={isLineZone} control={LineSizeControl} />
+            <ControlCondition objects={objects} test={hasLineProperties} control={LineSizeControl} />
 
             {/* TODO: change this to a two-column grid? */}
             <div className={mergeClasses(classes.row, classes.rightGap)}>
@@ -184,11 +191,15 @@ const Controls: React.FC = () => {
                 <ControlCondition objects={objects} test={isInnerRadiusObject} control={InnerRadiusControl} />
                 <ControlCondition objects={objects} test={isExaflareZone} control={ExaflareLengthControl} />
                 <ControlCondition objects={objects} test={isStarburstZone} control={StarburstSpokeWidthControl} />
+                <ControlCondition objects={objects} test={isProximityZone} control={ProximityTypeControl} />
+                <ControlCondition objects={objects} test={isEye} control={EyeInvertControl} />
             </div>
+            <ControlCondition objects={objects} test={isProximityZone} control={ProximityScaleControl} />
 
             <ControlCondition objects={objects} test={isRotateable} control={RotationControl} />
+
+            <ControlCondition objects={objects} test={isEnemy} control={EnemyControl} />
             <div className={mergeClasses(classes.row, classes.rightGap)}>
-                <ControlCondition objects={objects} test={isEnemy} control={EnemyRingControl} />
                 <ControlCondition objects={objects} test={isExaflareZone} control={ExaflareSpacingControl} />
                 <ControlCondition objects={objects} test={isStarburstZone} control={StarburstSpokeCountControl} />
 
@@ -208,8 +219,8 @@ const Controls: React.FC = () => {
             <ControlCondition objects={objects} test={isTether} control={TetherWidthControl} />
             <div className={mergeClasses(classes.row, classes.rightGap)}>
                 <ControlCondition objects={objects} test={supportsStackCount} control={StackCountControl} />
+                <ControlCondition objects={objects} test={supportsMultiHit} control={StackMultiHitControl} />
             </div>
-            <ControlCondition objects={objects} test={isEye} control={EyeInvertControl} />
             <ControlCondition objects={objects} test={isText} control={TextValueControl} />
             <div className={mergeClasses(classes.row, classes.rightGap)}>
                 <ControlCondition objects={objects} test={isIcon} control={IconStacksControl} />

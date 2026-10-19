@@ -1,4 +1,4 @@
-import { RelayHealth } from './nostr';
+import { type RelayHealth } from './nostr';
 
 /** Generic connectivity wording — default for contexts with no more specific meaning (e.g. general relay health). */
 export const CONNECTIVITY_STATUS_LABELS: Record<RelayHealth, string> = {

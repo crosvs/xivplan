@@ -19,13 +19,13 @@ import { SpinButton } from '../SpinButton';
 import { SpinButtonUnits } from '../SpinButtonUnits';
 import { ThreeQuarterCircleFilled, ThreeQuarterCircleRegular } from '../icon/ThreeQuarterCircle';
 import {
-    CustomRadialGrid,
-    CustomRectangularGrid,
+    type CustomRadialGrid,
+    type CustomRectangularGrid,
     DEFAULT_CUSTOM_RADIAL_GRID,
     DEFAULT_CUSTOM_RECT_GRID,
     DEFAULT_RADIAL_GRID,
     DEFAULT_RECT_GRID,
-    Grid,
+    type Grid,
     GridType,
     NO_GRID,
 } from '../scene';
@@ -80,20 +80,20 @@ function didCustomRadialGridChange(grid: CustomRadialGrid, ringsText: string, sp
 
 export const ArenaGridEdit: React.FC = () => {
     const classes = useControlStyles();
-    const { scene, dispatch } = useScene();
-    const grid = scene.arena.grid;
+    const { arena, dispatch } = useScene();
+    const grid = arena.grid;
 
     const setGrid = (grid: Grid, transient = false) => {
-        dispatch({ type: 'arenaGrid', value: grid, transient });
+        dispatch({ type: 'updateArena', value: { grid }, transient });
     };
 
     const commit = () => dispatch({ type: 'commit' });
 
     // TODO: refactor custom grids into their own components
-    const [customRows, setCustomRows] = useState(formatCustomGridRows(grid));
-    const [customCols, setCustomCols] = useState(formatCustomGridCols(grid));
-    const [customRings, setCustomRings] = useState(formatCustomGridRings(grid));
-    const [customSpokes, setCustomSpokes] = useState(formatCustomGridSpokes(grid));
+    const [customRows, setCustomRows] = useState(() => formatCustomGridRows(grid));
+    const [customCols, setCustomCols] = useState(() => formatCustomGridCols(grid));
+    const [customRings, setCustomRings] = useState(() => formatCustomGridRings(grid));
+    const [customSpokes, setCustomSpokes] = useState(() => formatCustomGridSpokes(grid));
 
     switch (grid.type) {
         case GridType.CustomRectangular:

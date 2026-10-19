@@ -1,28 +1,34 @@
-import { ArcConfig } from 'konva/lib/shapes/Arc';
 import React, { useState } from 'react';
-import { Arc, Circle, Group, Shape } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
+import { Arc, Circle, Group } from 'react-konva';
 import { useScene } from '../../SceneProvider';
 import Icon from '../../assets/zone/arc.svg?react';
-import { getAbsoluteRotation, getBaseFacingRotation, getPointerAngle, snapAngle } from '../../coord';
+import { getAbsoluteRotation, getBaseFacingRotation } from '../../coord';
 import { getResizeCursor } from '../../cursor';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { RendererProps, registerRenderer } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { type RendererProps, registerRenderer } from '../../render/ObjectRegistry';
 import { ActivePortal } from '../../render/Portals';
 import { LayerName } from '../../render/layers';
-import { ArcZone, ObjectType, Scene } from '../../scene';
+import { type ArcZone, type ObjectPrototype, ObjectType, type Scene } from '../../scene';
 import { useIsDragging } from '../../selection';
 import { CENTER_DOT_RADIUS, DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
-import { clamp, clampRotation, degtorad, mod360 } from '../../util';
+import { type Enum, clampRotation, degtorad, mod360 } from '../../util';
 import { VEC_ZERO, distance, getIntersectionDistance, vecAtAngle, vecNormal } from '../../vector';
-import { CONTROL_POINT_BORDER_COLOR, HandleFuncProps, HandleStyle, createControlPointManager } from '../ControlPoint';
+import { type ControlledObjectStateBase, createControlPointManager } from '../ControlPoint';
 import { DraggableObject } from '../DraggableObject';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
-import { MAX_CONE_ANGLE, MIN_CONE_ANGLE, MIN_RADIUS } from '../bounds';
+import { MIN_RADIUS } from '../bounds';
+import {
+    AngleHandleType,
+    CONTROL_POINT_BORDER_COLOR,
+    type HandleFuncProps,
+    HandleStyle,
+    getNewConeAngleFromPointer,
+    getNewRotationFromPointer,
+} from '../controlpoints';
 import { useHighlightProps, useOverrideProps, useShowResizer } from '../highlight';
+import { OffsetArc } from './shapes';
 import { getZoneStyle } from './style';
 
 const NAME = 'Arc';
@@ -31,96 +37,18 @@ const DEFAULT_RADIUS = 150;
 const DEFAULT_INNER_RADIUS = 75;
 const DEFAULT_ANGLE = 90;
 
-const ICON_SIZE = 32;
-
 export const ZoneArc: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-
-    return (
-        <PrefabIcon
-            draggable
-            name={NAME}
-            icon={<Icon />}
-            onDragStart={(e) => {
-                const offset = getDragOffset(e);
-                setDragObject({
-                    object: {
-                        type: ObjectType.Arc,
-                    },
-                    offset: {
-                        x: offset.x,
-                        y: offset.y - ICON_SIZE / 2,
-                    },
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<ArcZone>(ObjectType.Arc, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Arc,
-            color: DEFAULT_AOE_COLOR,
-            opacity: DEFAULT_AOE_OPACITY,
-            radius: DEFAULT_RADIUS,
-            innerRadius: DEFAULT_INNER_RADIUS,
-            coneAngle: DEFAULT_ANGLE,
-            rotation: 0,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<ArcZone> = {
+        type: ObjectType.Arc,
+        color: DEFAULT_AOE_COLOR,
+        opacity: DEFAULT_AOE_OPACITY,
+        radius: DEFAULT_RADIUS,
+        innerRadius: DEFAULT_INNER_RADIUS,
+        coneAngle: DEFAULT_ANGLE,
+        rotation: 0,
     };
-});
 
-interface OffsetArcProps extends ArcConfig {
-    shapeOffset: number;
-}
-
-const OffsetArc: React.FC<OffsetArcProps> = ({ innerRadius, outerRadius, angle, shapeOffset, ...props }) => {
-    const angleRad = degtorad(angle);
-    const offsetInnerRadius = innerRadius - shapeOffset;
-    const offsetOuterRadius = outerRadius + shapeOffset;
-
-    const innerArcX1 = offsetInnerRadius;
-    const innerArcY1 = 0;
-    const innerArcX2 = offsetInnerRadius * Math.cos(angleRad);
-    const innerArcY2 = offsetInnerRadius * Math.sin(angleRad);
-
-    const innerCornerX1 = innerArcX1;
-    const innerCornerY1 = innerArcY1 - shapeOffset;
-    const innerCornerX2 = innerArcX2 + shapeOffset * Math.cos(angleRad + Math.PI / 2);
-    const innerCornerY2 = innerArcY2 + shapeOffset * Math.sin(angleRad + Math.PI / 2);
-
-    const outerArcX1 = offsetOuterRadius;
-    const outerArcY1 = 0;
-    const outerArcX2 = offsetOuterRadius * Math.cos(angleRad);
-    const outerArcY2 = offsetOuterRadius * Math.sin(angleRad);
-
-    const outerCornerX1 = outerArcX1;
-    const outerCornerY1 = outerArcY1 - shapeOffset;
-    const outerCornerX2 = outerArcX2 + shapeOffset * Math.cos(angleRad + Math.PI / 2);
-    const outerCornerY2 = outerArcY2 + shapeOffset * Math.sin(angleRad + Math.PI / 2);
-
-    return (
-        <Shape
-            {...props}
-            sceneFunc={(ctx, shape) => {
-                ctx.beginPath();
-
-                ctx.arc(0, 0, offsetInnerRadius, 0, angleRad, false);
-                ctx.lineTo(innerCornerX2, innerCornerY2);
-                ctx.lineTo(outerCornerX2, outerCornerY2);
-                ctx.arc(0, 0, offsetOuterRadius, angleRad, 0, true);
-                ctx.lineTo(innerCornerX1, innerCornerY1);
-                ctx.lineTo(outerCornerX1, outerCornerY1);
-
-                ctx.closePath();
-                ctx.fillStrokeShape(shape);
-            }}
-        />
-    );
+    return <PrefabIcon name={NAME} icon={<Icon />} object={object} renderDrag />;
 };
 
 interface ArcRendererProps extends RendererProps<ArcZone> {
@@ -234,14 +162,15 @@ const ArcDetails: React.FC<ListComponentProps<ArcZone>> = ({ object, ...props })
 
 registerListComponent<ArcZone>(ObjectType.Arc, ArcDetails);
 
-enum HandleId {
-    Radius,
-    InnerRadius,
-    Angle1,
-    Angle2,
-}
+const HandleId = {
+    Radius: 0,
+    InnerRadius: 1,
+    Angle1: 2,
+    Angle2: 3,
+} as const;
+type HandleId = Enum<typeof HandleId>;
 
-interface ArcState {
+interface ArcState extends ControlledObjectStateBase {
     radius: number;
     innerRadius: number;
     rotation: number;
@@ -250,11 +179,8 @@ interface ArcState {
 
 const OUTSET = 2;
 
-const ROTATE_SNAP_DIVISION = 15;
-const ROTATE_SNAP_TOLERANCE = 2;
-
-function getRadius(object: ArcZone, { pointerPos, activeHandleId }: HandleFuncProps) {
-    if (pointerPos && activeHandleId === HandleId.Radius) {
+function getRadius(object: ArcZone, { pointerPos, activeHandleId, modifierKeys }: HandleFuncProps) {
+    if (pointerPos && activeHandleId === HandleId.Radius && !modifierKeys?.ctrlKey) {
         return Math.max(MIN_RADIUS, Math.round(distance(pointerPos) - OUTSET));
     }
 
@@ -276,37 +202,35 @@ function getInnerRadius(scene: Readonly<Scene>, object: ArcZone, { pointerPos, a
     return object.innerRadius;
 }
 
-function getRotation(scene: Readonly<Scene>, object: ArcZone, { pointerPos, activeHandleId }: HandleFuncProps) {
-    if (pointerPos && activeHandleId === HandleId.Radius) {
-        const angle = getPointerAngle(pointerPos);
-        const baseRotation = getBaseFacingRotation(scene, object);
-        return snapAngle(angle - baseRotation, ROTATE_SNAP_DIVISION, ROTATE_SNAP_TOLERANCE) + baseRotation;
+function getRotation(
+    scene: Readonly<Scene>,
+    object: ArcZone,
+    { pointerPos, activeHandleId, modifierKeys }: HandleFuncProps,
+) {
+    if (pointerPos && activeHandleId === HandleId.Radius && !modifierKeys?.shiftKey) {
+        return getNewRotationFromPointer(scene, object, pointerPos, modifierKeys);
     }
 
     return getAbsoluteRotation(scene, object);
 }
 
-function getConeAngle(scene: Readonly<Scene>, object: ArcZone, { pointerPos, activeHandleId }: HandleFuncProps) {
+function getConeAngle(
+    scene: Readonly<Scene>,
+    object: ArcZone,
+    { pointerPos, activeHandleId, modifierKeys }: HandleFuncProps,
+) {
     if (pointerPos) {
-        const objectRotation = getAbsoluteRotation(scene, object);
-        const angle = getPointerAngle(pointerPos);
-
         if (activeHandleId === HandleId.Angle1) {
-            const coneAngle = snapAngle(
-                mod360(angle - objectRotation + 90) - 90,
-                ROTATE_SNAP_DIVISION,
-                ROTATE_SNAP_TOLERANCE,
-            );
-            return clamp(coneAngle * 2, MIN_CONE_ANGLE, MAX_CONE_ANGLE);
+            return getNewConeAngleFromPointer(scene, object, pointerPos, modifierKeys, AngleHandleType.CLOCKWISE);
         }
         if (activeHandleId === HandleId.Angle2) {
-            const coneAngle = snapAngle(
-                mod360(angle - objectRotation + 270) - 270,
-                ROTATE_SNAP_DIVISION,
-                ROTATE_SNAP_TOLERANCE,
+            return getNewConeAngleFromPointer(
+                scene,
+                object,
+                pointerPos,
+                modifierKeys,
+                AngleHandleType.COUNTERCLOCKWISE,
             );
-
-            return clamp(-coneAngle * 2, MIN_CONE_ANGLE, MAX_CONE_ANGLE);
         }
     }
 

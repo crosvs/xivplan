@@ -16,8 +16,8 @@ import {
     Input,
     MessageBar,
     MessageBarBody,
-    TableColumnDefinition,
-    TableColumnId,
+    type TableColumnDefinition,
+    type TableColumnId,
     TableRowIdContextProvider,
     Text,
     Toast,
@@ -43,13 +43,13 @@ import {
     bundleIcon,
 } from '@fluentui/react-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAsyncFn } from 'react-use';
+import { useAsyncFn } from '../useAsyncFn';
 import { CircularRelayIndicator } from './CircularRelayIndicator';
 import { CONNECTIVITY_STATUS_LABELS } from './relayStatusLabels';
 import { useNostrPubkey } from './useNostrPubkey';
 import { useRelayStatus } from './useRelayStatus';
 import {
-    NostrPlanInfo,
+    type NostrPlanInfo,
     deletePlan,
     duplicatePlan,
     getNostrShareUrl,
@@ -286,7 +286,7 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
         if (lastPlan) {
             setVaultUntil(Math.floor(lastPlan.publishedAt.getTime() / 1000) - 1);
         }
-    }, []);
+    });
 
     // Reload vault when the active pubkey changes
     const prevPubkeyRef = useRef<string | null>(null);
@@ -306,7 +306,7 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
         if (!isVaultStale || !currentPubkey) return;
         invalidateVaultCache(currentPubkey);
         loadVault(currentPubkey);
-        // loadVault is stable (useAsyncFn with [] deps); currentPubkey changes reset isVaultStale first.
+        // loadVault is stable (useAsyncFn callbacks always are); currentPubkey changes reset isVaultStale first.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isVaultStale, currentPubkey]);
 
@@ -341,7 +341,7 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
             };
             setVaultPlans((prev) => [newEntry, ...prev.filter((p) => p.id !== newEntry.id)]);
         }
-    }, [duplicateSource, duplicateName, currentPubkey, ownPubkey]);
+    });
 
     // Edit dialog state — renames and/or changes access in one go
     const [editSource, setEditSource] = useState<NostrPlanInfo | null>(null);
@@ -358,7 +358,7 @@ export const NostrVaultList: React.FC<NostrVaultListProps> = ({
         }
         setEditSource(null);
         setEditName('');
-    }, [editSource, editName, editVisibility, selectedId, currentPubkey, onSelectedChange]);
+    });
 
     const handleDelete = useCallback(
         async (id: string) => {

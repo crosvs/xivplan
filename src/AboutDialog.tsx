@@ -3,7 +3,7 @@ import {
     Dialog,
     DialogActions,
     DialogContent,
-    DialogProps,
+    type DialogProps,
     DialogSurface,
     DialogTitle,
     DialogTrigger,
@@ -17,56 +17,60 @@ import { HotkeyBlockingDialogBody } from './HotkeyBlockingDialogBody';
 export type AboutDialogProps = Omit<DialogProps, 'children'>;
 
 export const AboutDialog: React.FC<AboutDialogProps> = (props) => {
-    const classes = useStyles();
-
     return (
         <Dialog {...props}>
             <DialogSurface>
-                <HotkeyBlockingDialogBody>
-                    <DialogTitle>About</DialogTitle>
-                    <DialogContent className={classes.content}>
-                        <p>
-                            XIVPlan is a tool for quickly diagramming raid strategies for Final Fantasy XIV, inspired by{' '}
-                            <ExternalLink href="https://raidplan.io">RaidPlan.io</ExternalLink> and{' '}
-                            <ExternalLink href="https://ff14.toolboxgaming.space">
-                                FF14 Toolbox Gaming Space
-                            </ExternalLink>
-                            .
-                        </p>
-                        <p>
-                            This fork of XIVPlan is open source on{' '}
-                            <ExternalLink href="https://github.com/Crosvs/xivplan">GitHub</ExternalLink>. If you find a
-                            bug or have other feedback, please create a{' '}
-                            <ExternalLink href="https://github.com/Crosvs/xivplan/issues/new/choose">
-                                new issue
-                            </ExternalLink>{' '}
-                            on GitHub.
-                        </p>
-                        <h2>Credits</h2>
-                        <p>XIVPlan is © 2021 Joel Spadin and contributors. This fork is maintained by Crosvs.</p>
-                        <p>Job, role, waymark, and enemy icons are © SQUARE ENIX CO., LTD. All Rights Reserved.</p>
-                        <p>
-                            <ExternalLink href="https://magentalava.gumroad.com/l/limitcuticons">
-                                Limit cut counter icons
-                            </ExternalLink>{' '}
-                            by yullanellis.
-                        </p>
-                        <p>
-                            Some{' '}
-                            <ExternalLink href="https://github.com/kotarou3/ffxiv-arena-images">
-                                arena background images
-                            </ExternalLink>{' '}
-                            by kotarou3
-                        </p>
-                    </DialogContent>
-                    <DialogActions>
-                        <DialogTrigger disableButtonEnhancement>
-                            <Button appearance="secondary">Close</Button>
-                        </DialogTrigger>
-                    </DialogActions>
-                </HotkeyBlockingDialogBody>
+                <AboutDialogBody />
             </DialogSurface>
         </Dialog>
+    );
+};
+
+const AboutDialogBody: React.FC = () => {
+    const classes = useStyles();
+
+    return (
+        <HotkeyBlockingDialogBody>
+            <DialogTitle>About</DialogTitle>
+            <DialogContent className={classes.content}>
+                <p>
+                    XIVPlan is a tool for quickly diagramming raid strategies for Final Fantasy XIV, inspired by{' '}
+                    <ExternalLink href="https://raidplan.io">RaidPlan.io</ExternalLink> and{' '}
+                    <ExternalLink href="https://ff14.toolboxgaming.space">FF14 Toolbox Gaming Space</ExternalLink>.
+                </p>
+                <p>
+                    This fork of XIVPlan is open source on{' '}
+                    <ExternalLink href="https://github.com/Crosvs/xivplan">GitHub</ExternalLink>. If you find a bug or
+                    have other feedback, please create a{' '}
+                    <ExternalLink href="https://github.com/Crosvs/xivplan/issues/new/choose">new issue</ExternalLink> on
+                    GitHub.
+                </p>
+                <h2>Credits</h2>
+                <p>XIVPlan is © 2021 Joel Spadin and contributors. This fork is maintained by Crosvs.</p>
+                <p>
+                    Site icon, job, role, marker, status, and enemy images are © SQUARE ENIX CO., LTD. All Rights
+                    Reserved.
+                </p>
+                <p>
+                    <ExternalLink href="https://magentalava.gumroad.com/l/limitcuticons">
+                        Limit cut counter icons
+                    </ExternalLink>{' '}
+                    by yullanellis.
+                </p>
+                <p>
+                    Some{' '}
+                    <ExternalLink href="https://github.com/kotarou3/ffxiv-arena-images">
+                        arena background images
+                    </ExternalLink>{' '}
+                    by kotarou3
+                </p>
+            </DialogContent>
+            <DialogActions>
+                <DialogTrigger disableButtonEnhancement>
+                    <Button appearance="secondary">Close</Button>
+                </DialogTrigger>
+            </DialogActions>
+        </HotkeyBlockingDialogBody>
     );
 };
 

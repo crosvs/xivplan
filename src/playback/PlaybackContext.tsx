@@ -13,16 +13,16 @@
 
 /* eslint-disable react-refresh/only-export-components */
 import React, {
-    PropsWithChildren,
+    type PropsWithChildren,
     createContext,
     useCallback,
-    useContext,
+    use,
     useEffect,
     useMemo,
     useRef,
     useState,
 } from 'react';
-import { Scene, SceneObject, SceneStep } from '../scene';
+import { type Scene, type SceneObject, type SceneStep } from '../scene';
 import { interpolateStep } from './interpolate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -215,7 +215,7 @@ export const StaticPlaybackProvider: React.FC<PropsWithChildren<{ playbackTime: 
 
 /** Returns playback context, or null when used outside <PlaybackProvider>. */
 export function useOptionalPlayback(): PlaybackContextValue | null {
-    return useContext(PlaybackContext);
+    return use(PlaybackContext);
 }
 
 /**
@@ -224,12 +224,12 @@ export function useOptionalPlayback(): PlaybackContextValue | null {
  * it causes re-renders at browser framerate.
  */
 export function usePulseTime(): number {
-    return useContext(PulseTimeContext);
+    return use(PulseTimeContext);
 }
 
 /** Returns playback context. Must be used inside <PlaybackProvider>. */
 export function usePlayback(): PlaybackContextValue {
-    const ctx = useContext(PlaybackContext);
+    const ctx = use(PlaybackContext);
     if (!ctx) {
         throw new Error('usePlayback must be used inside <PlaybackProvider>');
     }
@@ -242,14 +242,14 @@ export function usePlayback(): PlaybackContextValue {
  * re-render when playbackTime advances during playback.
  */
 export function usePlaybackDispatch(): PlaybackDispatchValue {
-    const ctx = useContext(PlaybackDispatchContext);
+    const ctx = use(PlaybackDispatchContext);
     if (!ctx) throw new Error('usePlaybackDispatch must be used inside <PlaybackProvider>');
     return ctx;
 }
 
 /** Returns stable dispatch context, or null when outside <PlaybackProvider>. */
 export function useOptionalPlaybackDispatch(): PlaybackDispatchValue | null {
-    return useContext(PlaybackDispatchContext);
+    return use(PlaybackDispatchContext);
 }
 
 /**

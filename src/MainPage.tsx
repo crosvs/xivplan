@@ -1,6 +1,6 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import React, { useEffect, useRef } from 'react';
-import { useMedia, useWindowSize } from 'react-use';
+import { useMediaQuery, useWindowSize } from '@react-hookz/web';
 import { EditModeProvider } from './EditModeProvider';
 import { RegularHotkeyHandler } from './HotkeyHandler';
 import { MainToolbar } from './MainToolbar';
@@ -70,7 +70,7 @@ const MainPageContent: React.FC = () => {
     const { setPlaybackTime, togglePlay, isPlayingRef } = usePlaybackDispatch();
     const maxStep = scene.steps.length - 1;
     const [previewMode] = usePreviewMode();
-    const isPortrait = useMedia('(orientation: portrait)');
+    const isPortrait = useMediaQuery('(orientation: portrait)') ?? false;
 
     // Landscape's panel columns auto-size to their own content rather than splitting a directly
     // measurable "available" share (the canvas's 1fr column absorbs whatever the panels don't

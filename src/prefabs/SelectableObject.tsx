@@ -1,10 +1,10 @@
-import { KonvaEventObject } from 'konva/lib/Node';
-import { Vector2d } from 'konva/lib/types';
-import React, { PropsWithChildren, useRef } from 'react';
+import type { KonvaEventObject } from 'konva/lib/Node';
+import type { Vector2d } from 'konva/lib/types';
+import React, { type PropsWithChildren, useRef } from 'react';
 import { Group } from 'react-konva';
 import { useIsAllowedConnectionTarget, useUpdateConnectedIdsAction } from '../connections';
 import { EditMode } from '../editMode';
-import { isMoveable, SceneObject } from '../scene';
+import { isMoveable, type SceneObject } from '../scene';
 import { useScene } from '../SceneProvider';
 import {
     addSelection,
@@ -22,6 +22,8 @@ import { usePreviewMode } from '../usePreviewMode';
 
 // How long a touch must be held in place before it selects the object.
 const HOLD_DURATION_MS = 450;
+
+const MIDDLE_BUTTON = 1;
 
 /** Konva node name marking every selectable scene object, so other code (SceneRenderer's touch
  * handling) can recognize "this is a scene object" from a raw Konva event target. */
@@ -54,6 +56,12 @@ export const SelectableObject: React.FC<SelectableObjectProps> = ({ object, chil
     };
 
     const onClick = (e: KonvaEventObject<MouseEvent>) => {
+        // The middle button is reserved for panning the canvas (see SceneRenderer), so it shouldn't also select.
+        // The right button still selects, which gives a way to select an object without risking moving it.
+        if (e.evt.button === MIDDLE_BUTTON) {
+            return;
+        }
+
         if (editMode == EditMode.SelectConnection) {
             if (isMoveable(object) && isAllowedConnectionTarget) {
                 dispatch(getUpdateConnectionIdsAction(object));

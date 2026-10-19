@@ -1,23 +1,29 @@
 import React, { useState } from 'react';
 import { Circle, Line } from 'react-konva';
 import { useScene } from '../../SceneProvider';
-import { getAbsoluteRotation, getBaseFacingRotation, getPointerAngle, rotateCoord, snapAngle } from '../../coord';
+import { getAbsoluteRotation, getBaseFacingRotation, rotateCoord } from '../../coord';
 import { getResizeCursor } from '../../cursor';
 import { ActivePortal } from '../../render/Portals';
-import { Scene, StarburstZone, UnknownObject } from '../../scene';
+import type { Scene, StarburstZone, UnknownObject } from '../../scene';
 import { useIsDragging } from '../../selection';
-import { clampRotation, mod360 } from '../../util';
+import { clampRotation, mod360, type Enum } from '../../util';
 import { distance } from '../../vector';
-import { CONTROL_POINT_BORDER_COLOR, HandleFuncProps, HandleStyle, createControlPointManager } from '../ControlPoint';
+import { createControlPointManager, type ControlledObjectStateBase } from '../ControlPoint';
 import { DraggableObject } from '../DraggableObject';
 import { MIN_RADIUS } from '../bounds';
+import {
+    CONTROL_POINT_BORDER_COLOR,
+    getNewRotationFromPointer,
+    HandleStyle,
+    type HandleFuncProps,
+} from '../controlpoints';
 import { useShowResizer } from '../highlight';
 
 interface StarburstControlProps {
     minSpokeWidth: number;
 }
 
-export interface StarburstObjectState {
+export interface StarburstObjectState extends ControlledObjectStateBase {
     radius: number;
     rotation: number;
     spokeWidth: number;
@@ -31,7 +37,7 @@ export interface ExtendedStarburstObjectState extends StarburstObjectState {
 export interface StarburstContainerProps extends StarburstControlProps {
     object: StarburstZone & UnknownObject;
     children: (state: ExtendedStarburstObjectState) => React.ReactElement;
-    onTransformEnd?(state: StarburstObjectState): void;
+    onTransformEnd?: (state: StarburstObjectState) => void;
 }
 
 export const StarburstControlContainer: React.FC<StarburstContainerProps> = ({
@@ -42,7 +48,7 @@ export const StarburstControlContainer: React.FC<StarburstContainerProps> = ({
 }) => {
     const { dispatch, scene } = useScene();
     const showResizer = useShowResizer(object);
-    const [isResizing, setResizing] = useState(false);
+    const [isResizing, setIsResizing] = useState(false);
     const isDragging = useIsDragging(object);
 
     const updateObject = (state: StarburstObjectState) => {
@@ -63,7 +69,7 @@ export const StarburstControlContainer: React.FC<StarburstContainerProps> = ({
             <DraggableObject object={object}>
                 <StarburstControlPoints
                     object={object}
-                    onActive={setResizing}
+                    onActive={setIsResizing}
                     visible={showResizer && !isDragging}
                     onTransformEnd={updateObject}
                     minSpokeWidth={minSpokeWidth}
@@ -91,17 +97,15 @@ function stateChanged(object: StarburstZone, state: StarburstObjectState) {
     return false;
 }
 
-enum HandleId {
-    Radius,
-    Rotate,
-    SpokeWidth,
-}
+const HandleId = {
+    Radius: 0,
+    Rotate: 1,
+    SpokeWidth: 2,
+} as const;
+type HandleId = Enum<typeof HandleId>;
 
 const OUTSET = 2;
 const ROTATE_HANDLE_OFFSET = 50;
-
-const ROTATE_SNAP_DIVISION = 15;
-const ROTATE_SNAP_TOLERANCE = 2;
 
 function getRadius(object: StarburstZone, { pointerPos, activeHandleId }: HandleFuncProps) {
     if (pointerPos && activeHandleId === HandleId.Radius) {
@@ -125,11 +129,13 @@ function getSpokeWidth(
     return object.spokeWidth;
 }
 
-function getRotation(scene: Readonly<Scene>, object: StarburstZone, { pointerPos, activeHandleId }: HandleFuncProps) {
+function getRotation(
+    scene: Readonly<Scene>,
+    object: StarburstZone,
+    { pointerPos, activeHandleId, modifierKeys }: HandleFuncProps,
+) {
     if (pointerPos && activeHandleId === HandleId.Rotate) {
-        const angle = getPointerAngle(pointerPos);
-        const baseRotation = getBaseFacingRotation(scene, object);
-        return snapAngle(angle - baseRotation, ROTATE_SNAP_DIVISION, ROTATE_SNAP_TOLERANCE) + baseRotation;
+        return getNewRotationFromPointer(scene, object, pointerPos, modifierKeys);
     }
 
     return getAbsoluteRotation(scene, object);

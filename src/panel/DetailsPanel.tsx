@@ -1,5 +1,5 @@
 import { Divider, makeStyles, mergeClasses, Tab, TabList, tokens, typographyStyles } from '@fluentui/react-components';
-import React, { PropsWithChildren, useState } from 'react';
+import React, { type PropsWithChildren, useState } from 'react';
 import { TabActivity } from '../TabActivity';
 import { useControlStyles } from '../useControlStyles';
 import { PANEL_PADDING, PANEL_WIDTH, WIDE_PANEL_WIDTH } from './PanelStyles';

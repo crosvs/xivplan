@@ -3,18 +3,17 @@ import {
     Dialog,
     DialogActions,
     DialogContent,
-    DialogProps,
+    type DialogProps,
     DialogSurface,
     DialogTitle,
     DialogTrigger,
 } from '@fluentui/react-components';
 import { Action } from 'history';
-import React, { PropsWithChildren, useId, useState } from 'react';
-import { Location, useNavigate } from 'react-router-dom';
-import { useBeforeUnload } from 'react-use';
+import React, { type PropsWithChildren, useEffect, useId, useState } from 'react';
+import { type Location, useNavigate } from 'react-router-dom';
 import { DirtyContext, SavedStateContext } from './DirtyContext';
 import { useScene } from './SceneProvider';
-import { Scene } from './scene';
+import type { Scene } from './scene';
 
 export const DirtyProvider: React.FC<PropsWithChildren> = ({ children }) => {
     const { canonicalScene } = useScene();
@@ -46,7 +45,7 @@ interface NextLocation {
 type OpenChangeEventHandler = Required<DialogProps>['onOpenChange'];
 
 const NavLockPrompt: React.FC<NavLockProps> = ({ locked }) => {
-    useBeforeUnload(locked, NAV_LOCK_MESSAGE);
+    useBeforeUnload(locked);
 
     const confirmId = useId();
     const navigate = useNavigate();
@@ -126,3 +125,19 @@ const NavLockPrompt: React.FC<NavLockProps> = ({ locked }) => {
         </>
     );
 };
+
+function useBeforeUnload(enabled: boolean) {
+    const handler = (ev: BeforeUnloadEvent) => {
+        ev.preventDefault();
+        ev.returnValue = true;
+    };
+
+    useEffect(() => {
+        if (!enabled) {
+            return;
+        }
+
+        window.addEventListener('beforeunload', handler);
+        return () => window.removeEventListener('beforeunload', handler);
+    });
+}

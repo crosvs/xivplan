@@ -1,62 +1,37 @@
-import { RectConfig } from 'konva/lib/shapes/Rect';
+import type { RectConfig } from 'konva/lib/shapes/Rect';
 import React from 'react';
 import { Group, Line } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
 import Icon from '../../assets/zone/triangle.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { registerListComponent, type ListComponentProps } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { ObjectType, RectangleZone } from '../../scene';
+import { ObjectType, type ObjectPrototype, type RectangleZone } from '../../scene';
 import { DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { ResizeableObjectContainer } from '../ResizeableObjectContainer';
+import { ModifierKeyBehavior } from '../controlpoints';
 import { useHighlightProps, useOverrideProps } from '../highlight';
 import { getZoneStyle } from './style';
 
 const NAME = 'Triangle';
 
-const DEFAULT_TRIANGLE_WIDTH = 100;
+const DEFAULT_TRIANGLE_WIDTH = 150;
 const DEFAULT_TRIANGLE_HEIGHT = Math.floor((DEFAULT_TRIANGLE_WIDTH * Math.sqrt(3)) / 2);
 
 export const ZoneTriangle: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-    return (
-        <PrefabIcon
-            draggable
-            name={NAME}
-            icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Triangle,
-                        width: DEFAULT_TRIANGLE_WIDTH,
-                        height: DEFAULT_TRIANGLE_HEIGHT,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<RectangleZone>(ObjectType.Triangle, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Triangle,
-            color: DEFAULT_AOE_COLOR,
-            opacity: DEFAULT_AOE_OPACITY,
-            width: DEFAULT_TRIANGLE_WIDTH,
-            height: DEFAULT_TRIANGLE_HEIGHT,
-            rotation: 0,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<RectangleZone> = {
+        type: ObjectType.Triangle,
+        color: DEFAULT_AOE_COLOR,
+        opacity: DEFAULT_AOE_OPACITY,
+        width: DEFAULT_TRIANGLE_WIDTH,
+        height: DEFAULT_TRIANGLE_HEIGHT,
+        rotation: 0,
     };
-});
+
+    return <PrefabIcon name={NAME} icon={<Icon />} object={object} renderDrag />;
+};
 
 const EquilateralTriangle: React.FC<RectConfig> = ({ width, height, ...props }) => {
     const w = width ?? 0;
@@ -74,32 +49,44 @@ const EquilateralTriangle: React.FC<RectConfig> = ({ width, height, ...props }) 
 const TriangleRenderer: React.FC<RendererProps<RectangleZone>> = ({ object }) => {
     const highlightProps = useHighlightProps(object);
     const overrideProps = useOverrideProps(object);
-    const style = getZoneStyle(object.color, object.opacity, Math.min(object.width, object.height), object.hollow);
-
-    const highlightOffset = style.strokeWidth;
-    const highlightWidth = object.width + highlightOffset;
-    const highlightHeight = object.height + highlightOffset;
-
-    const offsetY = (object.height * 2) / 3;
 
     return (
-        <ResizeableObjectContainer object={object} transformerProps={{ centeredScaling: true }}>
-            {(groupProps) => (
-                <Group {...groupProps} offsetY={offsetY} {...overrideProps}>
-                    {highlightProps && (
-                        <EquilateralTriangle
-                            offsetX={highlightOffset / 2}
-                            offsetY={highlightOffset / 2}
-                            width={highlightWidth}
-                            height={highlightHeight}
-                            {...highlightProps}
-                        />
-                    )}
-                    <HideGroup>
-                        <EquilateralTriangle width={object.width} height={object.height} {...style} />
-                    </HideGroup>
-                </Group>
-            )}
+        <ResizeableObjectContainer
+            object={object}
+            transformationProps={{
+                centerScalingBehavior: ModifierKeyBehavior.ForceEnabled,
+                keepRatioBehavior: ModifierKeyBehavior.Inverted,
+            }}
+        >
+            {(state) => {
+                const style = getZoneStyle(
+                    object.color,
+                    object.opacity,
+                    Math.min(state.width, state.height),
+                    object.hollow,
+                );
+
+                const highlightOffset = style.strokeWidth;
+                const highlightWidth = state.width + highlightOffset;
+                const highlightHeight = state.height + highlightOffset;
+
+                return (
+                    <Group {...state} {...overrideProps}>
+                        {highlightProps && (
+                            <EquilateralTriangle
+                                offsetX={highlightOffset / 2}
+                                offsetY={highlightOffset / 2}
+                                width={highlightWidth}
+                                height={highlightHeight}
+                                {...highlightProps}
+                            />
+                        )}
+                        <HideGroup>
+                            <EquilateralTriangle width={state.width} height={state.height} {...style} />
+                        </HideGroup>
+                    </Group>
+                );
+            }}
         </ResizeableObjectContainer>
     );
 };

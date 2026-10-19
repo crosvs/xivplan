@@ -2,7 +2,7 @@ import {
     Dialog,
     DialogActions,
     DialogContent,
-    DialogProps,
+    type DialogProps,
     DialogSurface,
     DialogTitle,
     Tab,
@@ -10,11 +10,11 @@ import {
     makeStyles,
     tokens,
 } from '@fluentui/react-components';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { OutPortal, createHtmlPortalNode } from 'react-reverse-portal';
 import { HotkeyBlockingDialogBody } from '../HotkeyBlockingDialogBody';
 import { TabActivity } from '../TabActivity';
-import { FileSource, useScene } from '../SceneProvider';
+import { type FileSource, useScene } from '../SceneProvider';
 import { FileSystemNotSupportedMessage, OpenFileSystem, SaveFileSystem } from './FileDialogFileSystem';
 import { OpenLocalStorage, SaveLocalStorage } from './FileDialogLocalStorage';
 import { OpenNostr, SaveNostr } from './FileDialogNostr';
@@ -35,19 +35,33 @@ function getInitialTab(sourceType: FileSource['type'] | undefined): Tabs {
     return supportsFs ? 'file' : 'localStorage';
 }
 
+/**
+ * The dialogs stay mounted between opens (only `open` toggles), so re-derive the default tab each
+ * time one opens rather than just once at initial mount — otherwise loading a different plan
+ * mid-session wouldn't be reflected the next time the dialog is opened.
+ */
+function useInitialTab(open: boolean | undefined) {
+    const { source } = useScene();
+    const [tab, setTab] = useState<Tabs>(() => getInitialTab(source?.type));
+    const [prevOpen, setPrevOpen] = useState(open);
+
+    // Adjusting state while rendering (rather than in an effect) avoids rendering the stale tab first.
+    // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        if (open) {
+            setTab(getInitialTab(source?.type));
+        }
+    }
+
+    return [tab, setTab] as const;
+}
+
 export type OpenDialogProps = Omit<DialogProps, 'children'>;
 
 export const OpenDialog: React.FC<OpenDialogProps> = (props) => {
     const classes = useStyles();
-    const { source } = useScene();
-    const [tab, setTab] = useState<Tabs>(() => getInitialTab(source?.type));
-    // The dialog stays mounted between opens (only `open` toggles), so re-derive the default tab
-    // each time it opens rather than just once at initial mount — otherwise loading a different
-    // plan mid-session wouldn't be reflected the next time this dialog is opened.
-    useEffect(() => {
-        if (props.open) setTab(getInitialTab(source?.type));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [props.open]);
+    const [tab, setTab] = useInitialTab(props.open);
     const portalNode = createHtmlPortalNode({ attributes: { class: classes.actionsPortal } });
 
     return (
@@ -97,12 +111,7 @@ export type SaveAsDialogProps = Omit<DialogProps, 'children'>;
 
 export const SaveAsDialog: React.FC<SaveAsDialogProps> = (props) => {
     const classes = useStyles();
-    const { source } = useScene();
-    const [tab, setTab] = useState<Tabs>(() => getInitialTab(source?.type));
-    useEffect(() => {
-        if (props.open) setTab(getInitialTab(source?.type));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [props.open]);
+    const [tab, setTab] = useInitialTab(props.open);
     const portalNode = createHtmlPortalNode();
 
     return (

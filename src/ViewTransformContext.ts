@@ -1,4 +1,4 @@
-import { createContext, Dispatch, SetStateAction } from 'react';
+import { createContext, type Dispatch, type SetStateAction } from 'react';
 
 export const MIN_ZOOM = 0.2;
 export const MAX_ZOOM = 5;

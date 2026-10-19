@@ -1,24 +1,27 @@
-import { Vector2d } from 'konva/lib/types';
+import type { Vector2d } from 'konva/lib/types';
 import { getAbsolutePosition, isWithinBox, isWithinRadius, makeRelative } from './coord';
 import { ConnectionType } from './EditModeContext';
 import { LayerName } from './render/layers';
 import { getLayerName } from './render/ObjectRegistry';
 import {
+    EnemyIconStyle,
+    isEnemy,
     isIcon,
     isMoveable,
     isRadiusObject,
     isResizable,
     isRotateable,
-    MoveableObject,
+    type MoveableObject,
     ObjectType,
-    RotateableObject,
-    Scene,
-    SceneObject,
-    SceneStep,
-    UnknownObject,
+    type RadiusObject,
+    type Scene,
+    type SceneObject,
+    type SceneStep,
+    type UnknownObject,
 } from './scene';
-import { getDirectPositionDescendants, getObjectById, SceneAction, useScene } from './SceneProvider';
+import { getDirectPositionDescendants, getObjectById, type SceneAction, useScene } from './SceneProvider';
 import { useConnectionSelection } from './useConnectionSelection';
+import type { Enum } from './util';
 
 /**
  * Returns the ConnectionType-appropriate functions to get the current connection ID for a single object,
@@ -143,80 +146,51 @@ export function omitInterconnectedObjects(
  * determined by the values in the ConnectionSelectionContext
  */
 export function useUpdateConnectedIdsAction(): (newParent: SceneObject & MoveableObject) => SceneAction {
-    const { scene } = useScene();
     const [{ objectIdsToConnect, connectionType }] = useConnectionSelection();
 
     switch (connectionType) {
         case ConnectionType.POSITION: {
             return (newParent: SceneObject & MoveableObject) => {
-                return createUpdatePositionParentIdsAction(scene, objectIdsToConnect, newParent);
+                return createUpdatePositionParentIdsAction(objectIdsToConnect, newParent);
             };
         }
         case ConnectionType.ROTATION: {
             return (newParent: SceneObject & MoveableObject) => {
-                return createUpdateRotationParentIdsAction(scene, objectIdsToConnect, newParent);
+                return createUpdateRotationParentIdsAction(objectIdsToConnect, newParent);
             };
         }
     }
 }
 
 function createUpdateRotationParentIdsAction(
-    scene: Scene,
     objectIdsToConnect: ReadonlySet<number>,
     newParent: SceneObject & MoveableObject,
 ): SceneAction {
-    const objectsToConnect: (SceneObject & RotateableObject)[] = [];
-    objectIdsToConnect.forEach((id) => {
-        const object = getObjectById(scene, id);
-        if (isRotateable(object)) {
-            objectsToConnect.push(object);
-        }
-    });
     return {
-        type: 'update',
-        value: objectsToConnect.map((obj) => {
+        type: 'transform',
+        ids: [...objectIdsToConnect],
+        transformFn: (obj) => {
+            if (!isRotateable(obj)) {
+                return obj;
+            }
             // always face the newly-connected target object by default.
             return { ...obj, facingId: newParent.id, rotation: 0 };
-        }),
+        },
     };
 }
 
 function createUpdatePositionParentIdsAction(
-    scene: Scene,
     objectIdsToConnect: ReadonlySet<number>,
     newParent: SceneObject & MoveableObject,
 ): SceneAction {
-    const objectsToConnect: (SceneObject & MoveableObject)[] = [];
-    objectIdsToConnect.forEach((id) => {
-        const object = getObjectById(scene, id);
-        if (isMoveable(object)) {
-            objectsToConnect.push(object);
-        }
-    });
-
-    const attachPositionCounts: Record<DefaultAttachPosition, number> = {
-        [DefaultAttachPosition.DONT_ATTACH_BY_DEFAULT]: 0,
-        [DefaultAttachPosition.ANYWHERE]: 0,
-        [DefaultAttachPosition.CENTER]: 0,
-        [DefaultAttachPosition.TOP]: 0,
-        [DefaultAttachPosition.BOTTOM_RIGHT]: 0,
-    };
-    objectsToConnect.forEach((obj) => {
-        attachPositionCounts[getDefaultAttachmentSettings(obj).location]++;
-    });
     return {
-        type: 'update',
-        value: objectsToConnect.map((obj) => {
-            const attachmentSettings = getDefaultAttachmentSettings(obj);
-            // If more than one object would get moved to the same spot, just leave them where they are to avoid full overlaps
-            // and ambiguous orderings. Center-attachments are fine to overlap.
-            // TODO: figure out what the expected behavior is for top & bottom-right. is arbitrary ordering fine?
-            if (
-                attachPositionCounts[attachmentSettings.location] > 1 &&
-                attachmentSettings.location != DefaultAttachPosition.CENTER
-            ) {
-                attachmentSettings.location = DefaultAttachPosition.ANYWHERE;
+        type: 'transform',
+        ids: [...objectIdsToConnect.values()],
+        transformFn: (obj, scene) => {
+            if (!isMoveable(obj)) {
+                return obj;
             }
+            const attachmentSettings = getAttachmentSettings(obj, scene, objectIdsToConnect);
             const newRelativePos = getRelativeAttachmentPoint(
                 scene,
                 { ...obj, ...getAbsolutePosition(scene, obj) },
@@ -228,31 +202,73 @@ function createUpdatePositionParentIdsAction(
                 positionParentId: newParent.id,
                 ...newRelativePos,
                 // Pin objects that got moved to a default position
-                pinned:
-                    attachmentSettings.location == DefaultAttachPosition.DONT_ATTACH_BY_DEFAULT ||
-                    attachmentSettings.location == DefaultAttachPosition.ANYWHERE
-                        ? obj.pinned
-                        : attachmentSettings.pinByDefault,
+                pinned: getNewPinnedState(obj, attachmentSettings),
             };
-        }),
+        },
     };
 }
 
-export enum DefaultAttachPosition {
-    DONT_ATTACH_BY_DEFAULT = 0,
-    ANYWHERE,
-    CENTER,
-    TOP,
-    BOTTOM_RIGHT,
+/**
+ * Calculates the new 'pinned' state after attaching an object. If the object didn't move
+ * during the attachment, keep the current state. Otherwise potentially pin it based on
+ * the default attachment settings.
+ */
+function getNewPinnedState(obj: MoveableObject, attachmentSettings: AttachmentSettings): boolean | undefined {
+    switch (attachmentSettings.location) {
+        case DefaultAttachPosition.ANYWHERE:
+        case DefaultAttachPosition.DONT_ATTACH_BY_DEFAULT:
+            return obj.pinned;
+        default:
+            // Make sure to keep pinned objects pinned, even if the default settings don't pin it.
+            return obj.pinned || attachmentSettings.pinByDefault;
+    }
 }
 
-/** @returns Where the given object 'prefers' to be attached to a positional parent. */
-export function getDefaultAttachmentSettings(object: UnknownObject): {
+function getAttachmentSettings(
+    obj: SceneObject,
+    scene: Scene,
+    objectIdsToConnect: ReadonlySet<number>,
+): AttachmentSettings {
+    const attachmentSettings = getDefaultAttachmentSettings(obj);
+    // If more than one object would get moved to the same spot, just leave them where they are to
+    // avoid full overlaps and ambiguous orderings. Center-attachments are fine to overlap.
+    // TODO: figure out what the expected behavior is for top & bottom-right. is arbitrary ordering fine?
+    if (attachmentSettings.location != DefaultAttachPosition.CENTER) {
+        for (const otherConnectingId of objectIdsToConnect) {
+            if (otherConnectingId != obj.id) {
+                const otherConnectingObj = getObjectById(scene, otherConnectingId);
+                if (
+                    otherConnectingObj &&
+                    getDefaultAttachmentSettings(otherConnectingObj).location === attachmentSettings.location
+                ) {
+                    attachmentSettings.location = DefaultAttachPosition.ANYWHERE;
+                    break;
+                }
+            }
+        }
+    }
+    return attachmentSettings;
+}
+
+export const DefaultAttachPosition = {
+    DONT_ATTACH_BY_DEFAULT: 0,
+    ANYWHERE: 1,
+    CENTER: 2,
+    TOP: 3,
+    BOTTOM_RIGHT: 4,
+} as const;
+export type DefaultAttachPosition = Enum<typeof DefaultAttachPosition>;
+
+export type AttachmentSettings = {
     location: DefaultAttachPosition;
     pinByDefault: boolean;
-} {
+};
+
+/** @returns Where the given object 'prefers' to be attached to a positional parent. */
+export function getDefaultAttachmentSettings(object: UnknownObject): AttachmentSettings {
     switch (object.type) {
         case ObjectType.Arc:
+        case ObjectType.Arrow:
         case ObjectType.Cone:
         case ObjectType.Donut:
         case ObjectType.Line:
@@ -273,11 +289,12 @@ export function getDefaultAttachmentSettings(object: UnknownObject): {
     }
 }
 
-export enum AttachmentDropTarget {
-    NONE = 0,
-    SELF,
-    PARENT,
-}
+export const AttachmentDropTarget = {
+    NONE: 0,
+    SELF: 1,
+    PARENT: 2,
+} as const;
+export type AttachmentDropTarget = Enum<typeof AttachmentDropTarget>;
 
 export function isValidAttachmentDropTarget(object: SceneObject): AttachmentDropTarget {
     switch (object.type) {
@@ -408,7 +425,7 @@ function getAttachTopPoint(scene: Scene, objectToAttach: SceneObject, parent: Sc
     if (isResizable(parent)) {
         parentAttachmentPoint = { x: 0, y: parent.height / 2 + addedHeight };
     } else if (isRadiusObject(parent)) {
-        parentAttachmentPoint = { x: 0, y: parent.radius + addedHeight };
+        parentAttachmentPoint = { x: 0, y: getParentRadius(parent) + addedHeight };
     }
     return {
         x: parentAttachmentPoint.x - objectAttatchmentPoint.x,
@@ -451,7 +468,7 @@ function getAttachBottomRightPoint(scene: Scene, objectToAttach: SceneObject, pa
         };
     } else if (isRadiusObject(parent)) {
         const overlap = 0.4;
-        const offset = Math.sqrt((parent.radius * (1 - overlap)) ** 2 / 2);
+        const offset = Math.sqrt((getParentRadius(parent) * (1 - overlap)) ** 2 / 2);
         parentAttachmentPoint = { x: offset + addedOffset, y: -offset };
     }
 
@@ -459,4 +476,15 @@ function getAttachBottomRightPoint(scene: Scene, objectToAttach: SceneObject, pa
         x: parentAttachmentPoint.x - objectAttatchmentPoint.x,
         y: parentAttachmentPoint.y - objectAttatchmentPoint.y,
     };
+}
+
+function getParentRadius(object: RadiusObject & UnknownObject): number {
+    // If the enemy object has an icon, approximately attach things to the icon
+    // instead of the ring. (the icon is technically a square, but since the
+    // non-transparent part is more akin to a circle it's OK to just take half
+    // the icon width as radius even for bottom-right attachments)
+    if (isEnemy(object) && object.icon !== EnemyIconStyle.NoIcon) {
+        return object.radius / 2;
+    }
+    return object.radius;
 }

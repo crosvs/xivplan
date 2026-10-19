@@ -2,31 +2,34 @@ import React, { useState } from 'react';
 import { Circle, Line } from 'react-konva';
 import { applyCrossStepChange } from '../crossStepChange';
 import { useScene } from '../SceneProvider';
-import { getAbsoluteRotation, getBaseFacingRotation, getPointerAngle, snapAngle } from '../coord';
+import { getAbsoluteRotation, getBaseFacingRotation } from '../coord';
 import { getResizeCursor } from '../cursor';
 import { ActivePortal } from '../render/Portals';
 import {
-    InnerRadiusObject,
-    RadiusObject,
-    Scene,
-    SceneObject,
-    UnknownObject,
+    type InnerRadiusObject,
+    type RadiusObject,
+    type Scene,
+    type SceneObject,
+    type UnknownObject,
     isRadiusObject,
     isRotateable,
 } from '../scene';
 import { useCrossStepSelection, useIsDragging } from '../selection';
 import { CENTER_DOT_RADIUS } from '../theme';
-import { clampRotation, mod360 } from '../util';
+import { type Enum, clampRotation, mod360 } from '../util';
 import { distance } from '../vector';
-import {
-    CONTROL_POINT_BORDER_COLOR,
-    Handle,
-    HandleFuncProps,
-    HandleStyle,
-    createControlPointManager,
-} from './ControlPoint';
+import { type ControlledObjectStateBase, createControlPointManager } from './ControlPoint';
 import { DraggableObject } from './DraggableObject';
 import { MIN_RADIUS } from './bounds';
+import {
+    CONTROL_POINT_BORDER_COLOR,
+    CONTROL_POINT_BORDER_OUTSET,
+    type Handle,
+    type HandleFuncProps,
+    HandleStyle,
+    ROTATE_HANDLE_OFFSET,
+    getNewRotationFromPointer,
+} from './controlpoints';
 import { useShowResizer } from './highlight';
 
 interface ControlPointProps {
@@ -34,7 +37,7 @@ interface ControlPointProps {
     allowInnerRadius?: boolean;
 }
 
-export interface RadiusObjectState {
+export interface RadiusObjectState extends ControlledObjectStateBase {
     radius: number;
     rotation: number;
     innerRadius: number;
@@ -48,7 +51,7 @@ export interface ExtendedRadiusObjectState extends RadiusObjectState {
 export interface RadiusObjectContainerProps extends ControlPointProps {
     object: RadiusObject & UnknownObject;
     children: (state: ExtendedRadiusObjectState) => React.ReactElement;
-    onTransformEnd?(state: RadiusObjectState): void;
+    onTransformEnd?: (state: RadiusObjectState) => void;
 }
 
 export const RadiusObjectContainer: React.FC<RadiusObjectContainerProps> = ({
@@ -61,7 +64,7 @@ export const RadiusObjectContainer: React.FC<RadiusObjectContainerProps> = ({
     const { dispatch, scene, stepIndex } = useScene();
     const { selection: crossStepSelection } = useCrossStepSelection();
     const showResizer = useShowResizer(object);
-    const [isResizing, setResizing] = useState(false);
+    const [isResizing, setIsResizing] = useState(false);
     const isDragging = useIsDragging(object);
 
     const updateObject = (state: RadiusObjectState) => {
@@ -123,7 +126,7 @@ export const RadiusObjectContainer: React.FC<RadiusObjectContainerProps> = ({
             <DraggableObject object={object}>
                 <RadiusControlPoints
                     object={object}
-                    onActive={setResizing}
+                    onActive={setIsResizing}
                     visible={showResizer && !isDragging}
                     onTransformEnd={updateObject}
                     allowRotate={allowRotate}
@@ -152,21 +155,16 @@ function stateChanged(object: RadiusObject, state: RadiusObjectState) {
     return false;
 }
 
-enum HandleId {
-    Radius,
-    Rotate,
-    InnerRadius,
-}
-
-const OUTSET = 2;
-const ROTATE_HANDLE_OFFSET = 50;
-
-const ROTATE_SNAP_DIVISION = 15;
-const ROTATE_SNAP_TOLERANCE = 2;
+const HandleId = {
+    Radius: 0,
+    Rotate: 1,
+    InnerRadius: 2,
+} as const;
+type HandleId = Enum<typeof HandleId>;
 
 function getRadius(object: RadiusObject, { pointerPos, activeHandleId }: HandleFuncProps) {
     if (pointerPos && activeHandleId === HandleId.Radius) {
-        return Math.max(MIN_RADIUS, Math.round(distance(pointerPos) - OUTSET));
+        return Math.max(MIN_RADIUS, Math.round(distance(pointerPos) - CONTROL_POINT_BORDER_OUTSET));
     }
 
     return object.radius;
@@ -187,7 +185,7 @@ function getInnerRadius(
     }
 
     if (pointerPos && activeHandleId === HandleId.InnerRadius) {
-        return Math.max(MIN_RADIUS, Math.round(distance(pointerPos) + OUTSET));
+        return Math.max(MIN_RADIUS, Math.round(distance(pointerPos) + CONTROL_POINT_BORDER_OUTSET));
     }
 
     return object.innerRadius;
@@ -196,7 +194,7 @@ function getInnerRadius(
 function getRotation(
     scene: Readonly<Scene>,
     object: RadiusObject,
-    { pointerPos, activeHandleId }: HandleFuncProps,
+    { pointerPos, activeHandleId, modifierKeys }: HandleFuncProps,
     { allowRotate }: ControlPointProps,
 ) {
     if (!allowRotate || !isRotateable(object)) {
@@ -204,9 +202,7 @@ function getRotation(
     }
 
     if (pointerPos && activeHandleId === HandleId.Rotate) {
-        const angle = getPointerAngle(pointerPos);
-        const baseRotation = getBaseFacingRotation(scene, object);
-        return snapAngle(angle - baseRotation, ROTATE_SNAP_DIVISION, ROTATE_SNAP_TOLERANCE) + baseRotation;
+        return getNewRotationFromPointer(scene, object, pointerPos, modifierKeys);
     }
 
     return getAbsoluteRotation(scene, object);
@@ -237,7 +233,7 @@ function getInnerRadiusHandles(r: number): Handle[] {
 
 const RadiusControlPoints = createControlPointManager<RadiusObject, RadiusObjectState, ControlPointProps>({
     handleFunc: (scene, object, handle, props) => {
-        const radius = getRadius(object, handle) + OUTSET;
+        const radius = getRadius(object, handle) + CONTROL_POINT_BORDER_OUTSET;
         const rotation = isRotateable(object) ? getAbsoluteRotation(scene, object) : 0;
         const handles = getNormalHandles(radius, rotation);
 
@@ -246,7 +242,7 @@ const RadiusControlPoints = createControlPointManager<RadiusObject, RadiusObject
         }
 
         if (props.allowInnerRadius) {
-            const innerRadius = getInnerRadius(object, handle, props) - OUTSET;
+            const innerRadius = getInnerRadius(object, handle, props) - CONTROL_POINT_BORDER_OUTSET;
             handles.push(...getInnerRadiusHandles(innerRadius));
         }
 
@@ -275,7 +271,7 @@ const RadiusControlPoints = createControlPointManager<RadiusObject, RadiusObject
                 )}
                 {allowInnerRadius && (
                     <Circle
-                        radius={innerRadius - OUTSET}
+                        radius={innerRadius - CONTROL_POINT_BORDER_OUTSET}
                         stroke={CONTROL_POINT_BORDER_COLOR}
                         strokeWidth={1}
                         fillEnabled={false}
@@ -283,7 +279,7 @@ const RadiusControlPoints = createControlPointManager<RadiusObject, RadiusObject
                 )}
                 <Circle radius={CENTER_DOT_RADIUS} fill={CONTROL_POINT_BORDER_COLOR} />
                 <Circle
-                    radius={outerRadius + OUTSET}
+                    radius={outerRadius + CONTROL_POINT_BORDER_OUTSET}
                     stroke={CONTROL_POINT_BORDER_COLOR}
                     strokeWidth={1}
                     fillEnabled={false}

@@ -1,6 +1,6 @@
-import { useContext } from 'react';
-import { PreviewModeContext, PreviewModeState } from './PreviewModeContext';
+import { use } from 'react';
+import { PreviewModeContext, type PreviewModeState } from './PreviewModeContext';
 
 export function usePreviewMode(): PreviewModeState {
-    return useContext(PreviewModeContext);
+    return use(PreviewModeContext);
 }

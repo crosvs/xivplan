@@ -1,4 +1,25 @@
-import { Vector2d } from 'konva/lib/types';
+import type { Vector2d } from 'konva/lib/types';
+
+/**
+ * Given an object like `const Foo { A: 0, B: 1 } as const;`, `Enum<typeof Foo>`
+ * generates a type with a value for each key, e.g `0 | 1`.
+ */
+export type Enum<T> = T[keyof T];
+
+/**
+ * Gets the keys of fields that can be omitted from an object.
+ */
+export type OptionalKeys<T> = keyof {
+    [K in keyof T as Omit<T, K> extends T ? K : never]: T[K];
+};
+
+/**
+ * Gets keys of optional fields of an object that can be set to `true`, e.g. "boolean?" fields, or fields
+ * such as "boolean | number" that also allow intermediate values while animating.
+ */
+export type OptionalBooleanKeys<T> = {
+    [K in keyof T]: K extends OptionalKeys<T> ? (true extends T[K] ? K : never) : never;
+}[keyof T];
 
 export function asArray<T>(x: Readonly<T> | readonly T[]): readonly T[] {
     return Array.isArray(x) ? x : [x as Readonly<T>];
@@ -39,7 +60,7 @@ export function* combinations<T>(items: readonly T[]): Generator<[T, T]> {
     }
 }
 
-export function isNotNull<T>(x: T | null | undefined): x is T {
+export function isNotNull<T>(x: T | null | undefined): x is null extends T ? never : undefined extends T ? never : T {
     return x !== null && x !== undefined;
 }
 
@@ -49,47 +70,21 @@ export function* reversed<T>(items: readonly T[]): Generator<T> {
     }
 }
 
-export function makeClassName(classes: Record<string, boolean>): string {
-    return Object.entries(classes)
-        .filter(([, value]) => value)
-        .map(([key]) => key)
-        .join(' ');
+export function omit<T extends object, K extends keyof T>(obj: Readonly<T>, omitKey: K): Omit<T, K> {
+    const result = { ...obj };
+    delete result[omitKey];
+    return result;
 }
 
-export function* mapIter<T, U>(iter: Iterable<T>, func: (item: T) => U): Generator<U> {
-    for (const item of iter) {
-        yield func(item);
+/**
+ * Returns a copy of an object with an field set to the given value or omitted
+ * if that value is either false or undefined.
+ */
+export function setOrOmit<T extends object, K extends OptionalKeys<T>>(obj: T, key: K, value: T[K]): T {
+    if (value === false || value === undefined) {
+        return omit(obj, key) as T;
     }
-}
-
-export function mapSet<T, U>(set: ReadonlySet<T>, func: (item: T) => U): Set<U> {
-    return new Set(mapIter(set, func));
-}
-
-export function omit<T extends object, K extends keyof T>(obj: T, omitKey: K): Omit<T, K> {
-    return Object.fromEntries(Object.entries(obj).filter(([key]) => key !== omitKey)) as Omit<T, K>;
-}
-
-type ObjectMapResult<T, V> = {
-    [k in keyof T]: V;
-};
-
-export function objectMap<V, T extends object, K extends keyof T>(
-    obj: T,
-    mapFn: (key: K, value: T[K]) => V,
-): ObjectMapResult<T, V> {
-    return Object.fromEntries(
-        Object.entries(obj).map(([key, value]) => [key, mapFn(key as K, value)]),
-    ) as ObjectMapResult<T, V>;
-}
-
-type HasOptionalBool<T, K extends keyof T> = T[K] extends boolean | number | undefined ? T : never;
-
-export function setOrOmit<T extends object, K extends keyof T>(obj: HasOptionalBool<T, K>, key: K, value: boolean): T {
-    if (value) {
-        return { ...obj, [key]: value };
-    }
-    return omit(obj, key) as HasOptionalBool<T, K>;
+    return { ...obj, [key]: value };
 }
 
 export function commonValue<T, U>(objects: readonly T[], value: (object: T) => U): U | undefined {
@@ -102,11 +97,14 @@ export function commonValue<T, U>(objects: readonly T[], value: (object: T) => U
 }
 
 export function getUrlFileExtension(url: string) {
-    const pathname = url.split(/[#?]/)[0] ?? '';
+    const parsed = URL.parse(url);
+    if (!parsed) {
+        return '';
+    }
 
-    const dotIndex = pathname.lastIndexOf('.');
+    const dotIndex = parsed.pathname.lastIndexOf('.');
 
-    return dotIndex >= 0 ? pathname.substring(dotIndex) : '';
+    return dotIndex >= 0 ? parsed.pathname.substring(dotIndex) : '';
 }
 
 export function removeFileExtension(path: string) {
@@ -146,7 +144,13 @@ export function fractionDigitsToStep(fractionDigits: number) {
  * Format a number, rounded to `fractionDigits` decimal places, with any trailing zeroes removed.
  */
 export function formatNumber(value: number | null | undefined, fractionDigits = 2) {
-    return value?.toFixed(fractionDigits).replace(/\.0+$/, '') ?? '';
+    const str = value?.toFixed(fractionDigits) ?? '';
+
+    if (str.includes('.')) {
+        return str.replace(/\.?0+$/, '');
+    }
+
+    return str;
 }
 
 export function getLinearGridDivs(divs: number, start: number, distance: number) {

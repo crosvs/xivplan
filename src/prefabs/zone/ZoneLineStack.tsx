@@ -1,147 +1,177 @@
+import { useDebouncedEffect } from '@react-hookz/web';
 import Konva from 'konva';
-import React, { useEffect, useRef, useState } from 'react';
-import { Group, Rect } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
+import type { RectConfig } from 'konva/lib/shapes/Rect';
+import React, { useRef, useState } from 'react';
+import { Circle, Group, Rect } from 'react-konva';
 import Icon from '../../assets/zone/line_stack.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { registerRenderer } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { ObjectType, RectangleZone } from '../../scene';
-import { DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
+import { type LineStackZone, type ObjectPrototype, ObjectType } from '../../scene';
+import { CENTER_DOT_RADIUS, DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
+import { useObjectLoading } from '../../useObjectLoading';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
-import { ResizeableObjectContainer } from '../ResizeableObjectContainer';
+import { MIN_LINE_LENGTH, MIN_LINE_WIDTH } from '../bounds';
 import { useHighlightProps, useOverrideProps } from '../highlight';
-import { ChevronConfig, ChevronTail } from './shapes';
-import { getArrowStyle } from './style';
+import { createLineShapeContainer, type LineShapeRendererProps } from '../lines';
+import { ChevronTail, type ChevronWithTailConfig } from './shapes';
+import { getArrowStyle, getZoneStyle } from './style';
 
 const NAME = 'Line stack';
 
 const DEFAULT_WIDTH = 100;
-const DEFAULT_HEIGHT = 150;
+const DEFAULT_LENGTH = 250;
 
 export const ZoneLineStack: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-
-    return (
-        <PrefabIcon
-            draggable
-            name={NAME}
-            icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.LineStack,
-                        width: DEFAULT_WIDTH,
-                        height: DEFAULT_HEIGHT,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<RectangleZone>(ObjectType.LineStack, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Rect,
-            color: DEFAULT_AOE_COLOR,
-            opacity: DEFAULT_AOE_OPACITY,
-            width: DEFAULT_WIDTH,
-            height: DEFAULT_HEIGHT,
-            rotation: 0,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<LineStackZone> = {
+        type: ObjectType.LineStack,
+        width: DEFAULT_WIDTH,
+        length: DEFAULT_LENGTH,
+        color: DEFAULT_AOE_COLOR,
+        opacity: DEFAULT_AOE_OPACITY,
+        rotation: 0,
     };
-});
+
+    return <PrefabIcon name={NAME} icon={<Icon />} object={object} renderDrag />;
+};
 
 const OFFSCREEN_X = -10000;
 const OFFSCREEN_Y = -10000;
+const MIN_REDRAW_MS = 20;
+const MAX_REDRAW_MS = 250;
 
 const CHEVRON_ANGLE = 40;
 
 const ARROW_SIZE_FRAC = 0.3;
-const ARROW_HEIGHT_FRAC = 3 / 5;
-const ARROW_PAD = 0.3;
+const ARROW_THICKNESS_FRAC = 0.28;
+const ARROW_PAD = 0.32;
 
-const LineStackRenderer: React.FC<RendererProps<RectangleZone>> = ({ object }) => {
+const LineStackRenderer: React.FC<LineShapeRendererProps<LineStackZone>> = ({
+    object,
+    length,
+    width,
+    rotation,
+    isDragging,
+}) => {
     const highlightProps = useHighlightProps(object);
     const overrideProps = useOverrideProps(object);
-    const [pattern, setPattern] = useState<HTMLImageElement>();
+    const style = getZoneStyle(object.color, object.opacity, Math.min(length, width), object.hollow);
 
-    const patternWidth = object.width;
-    const patternHeight = object.width / 2;
+    const x = -width / 2;
+    const y = -length;
+    const highlightOffset = style.strokeWidth;
+    const highlightWidth = width + highlightOffset;
+    const highlightLength = length + highlightOffset;
 
-    const width = patternWidth * ARROW_SIZE_FRAC;
-    const height = width * ARROW_HEIGHT_FRAC;
+    const patternWidth = width;
+    const patternHeight = Math.round(width / 2);
 
-    const arrow: ChevronConfig = {
-        ...getArrowStyle(object.color, object.opacity * 2),
-        width,
-        height,
+    const arrowWidth = patternWidth * ARROW_SIZE_FRAC;
+    const arrowThickness = arrowWidth * ARROW_THICKNESS_FRAC;
+
+    const arrowProps: Omit<ChevronWithTailConfig, 'thickness'> = {
+        ...getArrowStyle(object.color, object.opacity * 3),
+        opacity: (object.opacity * 2) / 100,
+    };
+
+    const sideArrowProps: ChevronWithTailConfig = {
+        ...arrowProps,
+        width: arrowWidth,
+        thickness: arrowThickness,
+        tailGap: arrowThickness * 0.1,
         y: patternHeight / 2,
         chevronAngle: CHEVRON_ANGLE,
     };
+    const sideArrowX1 = patternWidth * ARROW_PAD;
+    const sideArrowX2 = patternWidth - sideArrowX1;
+
+    const backgroundProps: RectConfig = object.hollow ? { stroke: undefined } : {};
 
     const arrowRef = useRef<Konva.Group>(null);
-    useEffect(() => {
-        arrowRef.current?.toImage({
-            // This seems like a hack. Is there a better way to draw offscreen?
-            x: OFFSCREEN_X,
-            y: OFFSCREEN_Y,
-            width: patternWidth,
-            height: patternHeight,
-            callback: setPattern,
-        });
-    }, [patternWidth, patternHeight, object.color, object.opacity, arrowRef]);
+    const [pattern, setPattern] = useState<HTMLImageElement>();
+    useObjectLoading(pattern === undefined);
+    const [cachedPatternWidth, setCachedPatternWidth] = useState<number>(patternWidth);
+    const [cachedPatternHeight, setCachedPatternHeight] = useState<number>(patternHeight);
+
+    useDebouncedEffect(
+        () => {
+            arrowRef.current?.toImage({
+                callback: (img) => {
+                    setPattern(img);
+                    setCachedPatternWidth(img.width);
+                    setCachedPatternHeight(img.height);
+                },
+            });
+        },
+        [patternWidth, patternHeight, object.color, object.opacity, arrowRef, object.multiHit],
+        MIN_REDRAW_MS,
+        MAX_REDRAW_MS,
+    );
 
     return (
         <>
-            <ResizeableObjectContainer object={object} transformerProps={{ centeredScaling: true, keepRatio: false }}>
-                {(groupProps) => (
-                    <Group {...groupProps} {...overrideProps}>
-                        {highlightProps && <Rect width={object.width} height={object.height} {...highlightProps} />}
-                        <HideGroup>
-                            <Rect
-                                width={object.width}
-                                height={object.height}
-                                fillPatternImage={pattern}
-                                fillPatternOffsetX={patternWidth / 2}
-                                fillPatternOffsetY={patternHeight / 2}
-                                fillPatternX={object.width / 2}
-                                fillPatternY={object.height / 2}
-                                fillPatternRepeat="repeat-y"
-                            />
-                            <ChevronTail
-                                rotation={180}
-                                chevronAngle={CHEVRON_ANGLE}
-                                x={object.width / 2}
-                                y={object.height / 2}
-                                width={object.width * 0.2}
-                                height={object.width * 0.13}
-                                fill={arrow.fill}
-                            />
-                        </HideGroup>
-                    </Group>
+            <Group rotation={rotation} {...overrideProps}>
+                {highlightProps && (
+                    <Rect
+                        x={x}
+                        y={y}
+                        width={highlightWidth}
+                        height={highlightLength}
+                        offsetX={highlightOffset / 2}
+                        offsetY={highlightOffset / 2}
+                        {...highlightProps}
+                    />
                 )}
-            </ResizeableObjectContainer>
+                <HideGroup>
+                    <Rect x={x} y={y} width={width} height={length} {...style} {...backgroundProps} />
+                    {/* TODO: fillPatternImage color is washed out compared to offscreen shape for some reason */}
+                    <Rect
+                        x={x}
+                        y={y}
+                        width={width}
+                        height={length}
+                        fillPatternImage={pattern}
+                        fillPatternOffsetX={cachedPatternWidth / 2}
+                        fillPatternOffsetY={cachedPatternHeight / 2}
+                        fillPatternX={width / 2}
+                        fillPatternY={length / 2}
+                        fillPatternScaleX={patternWidth / cachedPatternWidth}
+                        fillPatternScaleY={patternHeight / cachedPatternHeight}
+                        fillPatternRepeat="repeat-y"
+                    />
+                    <ChevronTail
+                        rotation={180 - rotation}
+                        chevronAngle={CHEVRON_ANGLE}
+                        x={0}
+                        y={-length / 2}
+                        width={width * 0.2}
+                        thickness={width * 0.065}
+                        offsetY={width * 0.1}
+                        {...arrowProps}
+                        doubleChevron={object.multiHit}
+                    />
 
-            <Group ref={arrowRef} x={OFFSCREEN_X} y={OFFSCREEN_Y} {...overrideProps}>
-                <ChevronTail x={patternWidth * ARROW_PAD} rotation={90} {...arrow} />
-                <ChevronTail x={patternWidth * (1 - ARROW_PAD)} rotation={-90} {...arrow} />
+                    {isDragging && <Circle radius={CENTER_DOT_RADIUS} fill={object.color} />}
+                </HideGroup>
+            </Group>
+
+            {/* Offscreen group to create the fill pattern */}
+            <Group ref={arrowRef} x={OFFSCREEN_X} y={OFFSCREEN_Y}>
+                <Rect width={patternWidth} height={patternHeight} />
+                <ChevronTail x={sideArrowX1} rotation={90} {...sideArrowProps} doubleChevron={object.multiHit} />
+                <ChevronTail x={sideArrowX2} rotation={-90} {...sideArrowProps} doubleChevron={object.multiHit} />
             </Group>
         </>
     );
 };
 
-registerRenderer<RectangleZone>(ObjectType.LineStack, LayerName.Ground, LineStackRenderer);
+const LineStackContainer = createLineShapeContainer(LineStackRenderer, MIN_LINE_WIDTH, MIN_LINE_LENGTH);
 
-const LineStackDetails: React.FC<ListComponentProps<RectangleZone>> = ({ object, ...props }) => {
+registerRenderer<LineStackZone>(ObjectType.LineStack, LayerName.Ground, LineStackContainer);
+
+const LineStackDetails: React.FC<ListComponentProps<LineStackZone>> = ({ object, ...props }) => {
     return (
         <DetailsItem
             icon={<Icon width="100%" height="100%" style={{ [panelVars.colorZoneOrange]: object.color }} />}
@@ -152,4 +182,4 @@ const LineStackDetails: React.FC<ListComponentProps<RectangleZone>> = ({ object,
     );
 };
 
-registerListComponent<RectangleZone>(ObjectType.LineStack, LineStackDetails);
+registerListComponent<LineStackZone>(ObjectType.LineStack, LineStackDetails);

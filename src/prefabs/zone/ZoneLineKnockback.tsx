@@ -1,15 +1,14 @@
 import Konva from 'konva';
+import type { RectConfig } from 'konva/lib/shapes/Rect';
 import React, { useEffect, useRef, useState } from 'react';
 import { Group, Rect } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
 import Icon from '../../assets/zone/line_knockback.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { registerListComponent, type ListComponentProps } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { ObjectType, RectangleZone } from '../../scene';
+import { ObjectType, type ObjectPrototype, type RectangleZone } from '../../scene';
 import { DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { ResizeableObjectContainer } from '../ResizeableObjectContainer';
@@ -20,42 +19,17 @@ import { getArrowStyle, getZoneStyle } from './style';
 const DEFAULT_SIZE = 150;
 
 export const ZoneLineKnockback: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-
-    return (
-        <PrefabIcon
-            draggable
-            name="Line knockback"
-            icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.LineKnockback,
-                        width: DEFAULT_SIZE,
-                        height: DEFAULT_SIZE,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<RectangleZone>(ObjectType.LineKnockback, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Rect,
-            color: DEFAULT_AOE_COLOR,
-            opacity: DEFAULT_AOE_OPACITY,
-            width: DEFAULT_SIZE,
-            height: DEFAULT_SIZE,
-            rotation: 0,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<RectangleZone> = {
+        type: ObjectType.LineKnockback,
+        color: DEFAULT_AOE_COLOR,
+        opacity: DEFAULT_AOE_OPACITY,
+        width: DEFAULT_SIZE,
+        height: DEFAULT_SIZE,
+        rotation: 0,
     };
-});
+
+    return <PrefabIcon name="Line knockback" icon={<Icon />} object={object} renderDrag />;
+};
 
 const OFFSCREEN_X = -10000;
 const OFFSCREEN_Y = -10000;
@@ -63,16 +37,18 @@ const OFFSCREEN_Y = -10000;
 const PATTERN_W = 50;
 const PATTERN_H = 50;
 const ARROW_W = 25;
-const ARROW_H = 15;
+const ARROW_T = 7.5;
 
 const LineKnockbackRenderer: React.FC<RendererProps<RectangleZone>> = ({ object }) => {
     const highlightProps = useHighlightProps(object);
     const overrideProps = useOverrideProps(object);
     const [pattern, setPattern] = useState<HTMLImageElement>();
-    const style = getZoneStyle(object.color, object.opacity, Math.min(object.width, object.height));
+    const style = getZoneStyle(object.color, object.opacity, Math.min(object.width, object.height), object.hollow);
 
     const arrow = getArrowStyle(object.color, object.opacity * 3);
     const { fill, ...stroke } = style;
+
+    const backgroundProps: RectConfig = object.hollow ? {} : stroke;
 
     const arrowRef = useRef<Konva.Group>(null);
     useEffect(() => {
@@ -86,49 +62,53 @@ const LineKnockbackRenderer: React.FC<RendererProps<RectangleZone>> = ({ object 
         });
     }, [fill, arrow, object.opacity, arrowRef]);
 
-    const highlightOffset = style.strokeWidth;
-    const highlightWidth = object.width + highlightOffset;
-    const highlightHeight = object.height + highlightOffset;
-
     return (
         <>
-            <ResizeableObjectContainer object={object} transformerProps={{ keepRatio: false }}>
-                {(groupProps) => (
-                    <Group {...groupProps} {...overrideProps}>
-                        {highlightProps && (
-                            <Rect
-                                offsetX={highlightOffset / 2}
-                                offsetY={highlightOffset / 2}
-                                width={highlightWidth}
-                                height={highlightHeight}
-                                {...highlightProps}
-                            />
-                        )}
-                        <HideGroup>
-                            <Rect
-                                width={object.width}
-                                height={object.height}
-                                fillPatternImage={pattern}
-                                fillPatternOffsetX={PATTERN_W / 2}
-                                fillPatternOffsetY={PATTERN_H / 2}
-                                fillPatternX={object.width / 2}
-                                fillPatternY={object.height / 2}
-                                fillPatternRepeat="repeat"
-                                {...stroke}
-                            />
-                        </HideGroup>
-                    </Group>
-                )}
+            <ResizeableObjectContainer object={object}>
+                {(state) => {
+                    const highlightOffset = style.strokeWidth;
+                    const highlightWidth = state.width + highlightOffset;
+                    const highlightHeight = state.height + highlightOffset;
+
+                    return (
+                        <Group {...state} {...overrideProps}>
+                            {highlightProps && (
+                                <Rect
+                                    offsetX={highlightOffset / 2}
+                                    offsetY={highlightOffset / 2}
+                                    width={highlightWidth}
+                                    height={highlightHeight}
+                                    {...highlightProps}
+                                />
+                            )}
+                            <HideGroup>
+                                <Rect
+                                    width={state.width}
+                                    height={state.height}
+                                    fillPatternImage={pattern}
+                                    fillPatternOffsetX={PATTERN_W / 2}
+                                    fillPatternOffsetY={PATTERN_H / 2}
+                                    fillPatternX={state.width / 2}
+                                    fillPatternY={state.height / 2}
+                                    fillPatternRepeat="repeat"
+                                    {...backgroundProps}
+                                />
+                            </HideGroup>
+                        </Group>
+                    );
+                }}
             </ResizeableObjectContainer>
 
             <Group ref={arrowRef} x={OFFSCREEN_X} y={OFFSCREEN_Y}>
                 <Rect width={PATTERN_W} height={PATTERN_H} fill={fill} />
                 <ChevronTail
                     width={ARROW_W}
-                    height={ARROW_H}
+                    thickness={ARROW_T}
+                    tailGap={ARROW_T * 0.1}
+                    tailThickness={ARROW_T * 1.4}
                     chevronAngle={40}
                     x={PATTERN_W / 2}
-                    y={PATTERN_H / 2 + ARROW_H}
+                    y={PATTERN_H / 2 + ARROW_T * 2}
                     rotation={180}
                     opacity={(object.opacity * 2) / 100}
                     {...arrow}

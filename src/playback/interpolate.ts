@@ -15,12 +15,13 @@
  */
 
 import {
-    AnimationProps,
-    BaseObject,
-    EasingStyle,
-    SceneObject,
-    SceneStep,
+    type AnimationProps,
+    type BaseObject,
+    type EasingStyle,
+    type SceneObject,
+    type SceneStep,
     isExaflareZone,
+    isArrow,
     isLineZone,
     isMoveable,
     isRadiusObject,
@@ -140,8 +141,8 @@ export function lerpObject(a: SceneObject, b: SceneObject, t: number, stepA: Sce
         result.height = lerp(a.height, b.height, et);
     }
 
-    // Line-specific props
-    if (isLineZone(a) && isLineZone(b)) {
+    // Line-specific props (arrows are line-shaped too: origin + direction + length)
+    if ((isLineZone(a) || isArrow(a)) && (isLineZone(b) || isArrow(b))) {
         result.length = lerp(a.length, b.length, et);
         result.width = lerp(a.width, b.width, et);
     }

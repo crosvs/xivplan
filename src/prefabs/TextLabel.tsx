@@ -1,27 +1,24 @@
 import { DrawTextRegular } from '@fluentui/react-icons';
 import Konva from 'konva';
-import { ShapeConfig } from 'konva/lib/Shape';
-import React, { RefObject, useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { Group, Text, Transformer } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../DropHandler';
+import type { ShapeConfig } from 'konva/lib/Shape';
+import React, { type RefObject, useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { Group, type KonvaNodeEvents, Text, Transformer } from 'react-konva';
 import { useScene } from '../SceneProvider';
 import { getAbsoluteRotation, getBaseFacingRotation } from '../coord';
 import { DetailsItem } from '../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../panel/ListComponentRegistry';
-import { RendererProps, registerRenderer } from '../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../panel/ListComponentRegistry';
+import { type RendererProps, registerRenderer } from '../render/ObjectRegistry';
 import { ActivePortal } from '../render/Portals';
 import { LayerName } from '../render/layers';
-import { ObjectType, TextObject } from '../scene';
+import { type ObjectPrototype, ObjectType, type TextObject } from '../scene';
 import { useIsDragging } from '../selection';
 import { useSceneTheme } from '../theme';
 import { useKonvaCache } from '../useKonvaCache';
-import { usePanelDrag } from '../usePanelDrag';
 import { clamp, clampRotation, mod360 } from '../util';
 import { CompositeReplaceGroup } from './CompositeReplaceGroup';
 import { DraggableObject } from './DraggableObject';
 import { HideCutoutGroup } from './HideGroup';
 import { PrefabIcon } from './PrefabIcon';
-import { GroupProps } from './ResizeableObjectContainer';
 import { useHighlightProps, useOverrideProps, useShowResizer } from './highlight';
 
 const DEFAULT_TEXT = 'Text';
@@ -33,44 +30,22 @@ const DEFAULT_FONT_SIZE = 25;
 const Icon = DrawTextRegular;
 
 export const TextLabel: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
     const theme = useSceneTheme();
 
-    return (
-        <PrefabIcon
-            draggable
-            name="Text"
-            icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Text,
-                        text: DEFAULT_TEXT,
-                        stroke: theme.colorArena,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<TextObject>(ObjectType.Text, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Text,
-            align: DEFAULT_TEXT_ALIGN,
-            fontSize: DEFAULT_FONT_SIZE,
-            color: DEFAULT_TEXT_COLOR,
-            opacity: DEFAULT_TEXT_OPACITY,
-            style: 'outline',
-            rotation: 0,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<TextObject> = {
+        type: ObjectType.Text,
+        stroke: theme.colorArena,
+        text: DEFAULT_TEXT,
+        align: DEFAULT_TEXT_ALIGN,
+        fontSize: DEFAULT_FONT_SIZE,
+        color: DEFAULT_TEXT_COLOR,
+        opacity: DEFAULT_TEXT_OPACITY,
+        style: 'outline',
+        rotation: 0,
     };
-});
+
+    return <PrefabIcon name="Text" icon={<Icon />} object={object} renderDrag />;
+};
 
 const LINE_HEIGHT = 1.2;
 
@@ -148,6 +123,8 @@ const TextResizer: React.FC<TextResizerProps> = ({ object, nodeRef, dragging, ch
         </>
     );
 };
+
+export type GroupProps = Konva.NodeConfig & KonvaNodeEvents;
 
 interface TextContainerProps {
     object: TextObject;

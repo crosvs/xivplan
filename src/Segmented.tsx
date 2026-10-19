@@ -1,8 +1,9 @@
 import {
     Radio,
     RadioGroup,
-    RadioGroupProps,
-    RadioProps,
+    type RadioGroupOnChangeData,
+    type RadioGroupProps,
+    type RadioProps,
     makeStyles,
     mergeClasses,
     radioClassNames,
@@ -11,16 +12,25 @@ import {
     typographyStyles,
 } from '@fluentui/react-components';
 import { iconFilledClassName, iconRegularClassName } from '@fluentui/react-icons';
-import React, { ReactNode } from 'react';
+import React, { type ReactNode } from 'react';
 import { OptionalTooltip } from './OptionalTooltip';
 
 export type SegmentedGroupProps = RadioGroupProps;
 
-export const SegmentedGroup: React.FC<SegmentedGroupProps> = ({ children, ...props }) => {
+// RadioGroup reverts to uncontrolled when value=undefined, but we want it to
+// show no value selected instead. Make an object that definitely doesn't match
+// any item value to use instead and pretend it's a string.
+const NONE_VALUE = Symbol() as unknown as string;
+
+/**
+ * Control that is like a RadioGroup but displays the options as a horizontal
+ * row of icons with the selected option highlighted.
+ */
+export const SegmentedGroup: React.FC<SegmentedGroupProps> = ({ children, value, ...props }) => {
     const classes = useStyles();
 
     return (
-        <RadioGroup layout="horizontal-stacked" {...props}>
+        <RadioGroup layout="horizontal-stacked" value={value ?? NONE_VALUE} {...props}>
             <div className={classes.track}>{children}</div>
         </RadioGroup>
     );
@@ -31,6 +41,9 @@ export interface SegmentProps extends RadioProps {
     size?: 'medium' | 'mediumText' | 'large';
 }
 
+/**
+ * An option within a SegmentedGroup.
+ */
 export const Segment: React.FC<SegmentProps> = ({ className, icon, size, title, ...props }) => {
     const classes = useStyles();
 
@@ -47,6 +60,52 @@ export const Segment: React.FC<SegmentProps> = ({ className, icon, size, title, 
         </OptionalTooltip>
     );
 };
+
+export interface BooleanSegmentedGroupOnChangeData {
+    value: boolean;
+}
+
+export interface BooleanSegmentedGroupProps extends Omit<SegmentedGroupProps, 'value' | 'onChange'> {
+    value?: boolean | undefined;
+    onChange?: (ev: React.SyntheticEvent<HTMLDivElement>, data: BooleanSegmentedGroupOnChangeData) => void;
+}
+
+/**
+ * Special case of SegmentedGroup for a Boolean value. It should have two
+ * BooleanSegment children whose values are true and false (in either order).
+ */
+export const BooleanSegmentedGroup: React.FC<BooleanSegmentedGroupProps> = ({
+    value,
+    onChange,
+    children,
+    ...props
+}) => {
+    const stringValue = value === undefined ? undefined : value ? TRUE_VALUE : FALSE_VALUE;
+
+    return (
+        <SegmentedGroup value={stringValue} onChange={(ev, data) => onChange?.(ev, getBoolChangeData(data))} {...props}>
+            {children}
+        </SegmentedGroup>
+    );
+};
+
+export interface BooleanSegmentProps extends Omit<SegmentProps, 'value'> {
+    value: boolean;
+}
+
+/**
+ * An option within a BooleanSegmentedGroup.
+ */
+export const BooleanSegment: React.FC<BooleanSegmentProps> = ({ value, ...props }) => {
+    return <Segment value={value ? TRUE_VALUE : FALSE_VALUE} {...props} />;
+};
+
+const FALSE_VALUE = 'false';
+const TRUE_VALUE = 'true';
+
+function getBoolChangeData(data: RadioGroupOnChangeData): BooleanSegmentedGroupOnChangeData {
+    return { value: data.value === TRUE_VALUE };
+}
 
 const useStyles = makeStyles({
     track: {

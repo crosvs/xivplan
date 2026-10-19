@@ -2,9 +2,9 @@ import { Button, Combobox, Field, Option, makeStyles, tokens } from '@fluentui/r
 import { DismissRegular } from '@fluentui/react-icons';
 import React, { useMemo, useState } from 'react';
 import { useScene } from '../../SceneProvider';
-import { SceneObject } from '../../scene';
+import { type SceneObject } from '../../scene';
 import { commonValue } from '../../util';
-import { PropertiesControlProps } from '../PropertiesControl';
+import { type PropertiesControlProps } from '../PropertiesControl';
 
 /** Collect all distinct non-empty trackIds used across all steps in the scene. */
 function useAllTrackIds(currentObjectIds: readonly number[]): string[] {

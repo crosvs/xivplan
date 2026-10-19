@@ -1,13 +1,21 @@
-import { KonvaEventObject } from 'konva/lib/Node';
-import React, { Dispatch, ReactNode, useRef } from 'react';
+import type { KonvaEventObject } from 'konva/lib/Node';
+import React, { type Dispatch, type ReactNode, useRef } from 'react';
 import { omitInterconnectedObjects } from '../connections';
-import { getCanvasCoord, getSceneCoord, makeRelative, Position } from '../coord';
-import { CrossStepSelection } from '../CrossStepContext';
+import { getCanvasCoord, getSceneCoord, makeRelative, type Position } from '../coord';
+import { type CrossStepSelection } from '../CrossStepContext';
 import { CursorGroup } from '../CursorGroup';
 import { EditMode } from '../editMode';
 import { moveObjectsBy } from '../groupOperations';
-import { isMoveable, MoveableObject, Scene, SceneObject, SceneStep, UnknownObject } from '../scene';
-import { SceneAction, useScene } from '../SceneProvider';
+import {
+    isMoveable,
+    type Arena,
+    type MoveableObject,
+    type Scene,
+    type SceneObject,
+    type SceneStep,
+    type UnknownObject,
+} from '../scene';
+import { useScene, type SceneAction } from '../SceneProvider';
 import {
     getNewDragSelection,
     getSelectedObjects,
@@ -17,7 +25,7 @@ import {
     useDragSelection,
     useSelection,
 } from '../selection';
-import { SceneSelection } from '../SelectionContext';
+import type { SceneSelection } from '../SelectionContext';
 import { useEditMode } from '../useEditMode';
 import { usePointerType } from '../usePointerType';
 import { usePreviewMode } from '../usePreviewMode';
@@ -33,11 +41,11 @@ export interface DraggableObjectProps {
 export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, children }) => {
     const [editMode] = useEditMode();
     const [previewMode] = usePreviewMode();
-    const { scene, step, stepIndex, dispatch } = useScene();
+    const { scene, step, arena, stepIndex, dispatch } = useScene();
     const [selection, setSelection] = useSelection();
     const [dragSelection, setDragSelection] = useDragSelection();
     const { selection: crossStepSelection } = useCrossStepSelection();
-    const center = getCanvasCoord(scene, object);
+    const center = getCanvasCoord(scene, arena, object);
     const isTouch = usePointerType() === 'touch';
 
     // Position of the dragged object at the start of the current drag, used to
@@ -71,15 +79,15 @@ export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, childr
         setDragSelection(newSelection);
         dragStartPos.current = { x: object.x, y: object.y, positionParentId: object.positionParentId };
 
-        updatePosition(scene, step, object, dragSelection, e, dispatch);
+        updatePosition(scene, arena, step, object, dragSelection, e, dispatch);
     };
 
     const handleDragMove = (e: KonvaEventObject<DragEvent>) => {
-        updatePosition(scene, step, object, dragSelection, e, dispatch);
+        updatePosition(scene, arena, step, object, dragSelection, e, dispatch);
     };
 
     const handleDragEnd = (e: KonvaEventObject<DragEvent>) => {
-        updatePosition(scene, step, object, dragSelection, e, dispatch);
+        updatePosition(scene, arena, step, object, dragSelection, e, dispatch);
 
         // Only now, once the drag is finished, apply the same start-to-end
         // translation to the matching objects selected on other pages. Doing
@@ -89,6 +97,7 @@ export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, childr
         if (dragStartPos.current) {
             applyCrossStepDrag(
                 scene,
+                arena,
                 stepIndex,
                 dragSelection,
                 crossStepSelection,
@@ -129,6 +138,7 @@ export const DraggableObject: React.FC<DraggableObjectProps> = ({ object, childr
 
 function updatePosition(
     scene: Scene,
+    arena: Arena,
     step: SceneStep,
     targetObject: MoveableObject & UnknownObject,
     dragSelection: SceneSelection,
@@ -138,7 +148,7 @@ function updatePosition(
     // Konva automatically moves the object to e.target.position() in canvas
     // coordinates. Subtracting the object's original position gives the offset
     // that needs to be applied to all objects being dragged.
-    const pos = makeRelative(scene, getSceneCoord(scene, e.target.position()), targetObject.positionParentId);
+    const pos = makeRelative(scene, getSceneCoord(scene, arena, e.target.position()), targetObject.positionParentId);
     const offset = vecSub(pos, targetObject);
 
     if (offset.x === 0 && offset.y === 0) {
@@ -159,6 +169,7 @@ function updatePosition(
  */
 function applyCrossStepDrag(
     scene: Scene,
+    arena: Arena,
     currentStepIndex: number,
     dragSelection: SceneSelection,
     crossStepSelection: CrossStepSelection,
@@ -180,7 +191,11 @@ function applyCrossStepDrag(
         return;
     }
 
-    const finalPos = makeRelative(scene, getSceneCoord(scene, e.target.position()), targetObject.positionParentId);
+    const finalPos = makeRelative(
+        scene,
+        getSceneCoord(scene, arena, e.target.position()),
+        targetObject.positionParentId,
+    );
     const offset = vecSub(finalPos, dragStartPos);
 
     if (offset.x === 0 && offset.y === 0) {

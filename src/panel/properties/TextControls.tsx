@@ -22,8 +22,7 @@ import { useScene } from '../../SceneProvider';
 import { Segment, SegmentedGroup } from '../../Segmented';
 import { SpinButton } from '../../SpinButton';
 import { MIN_FONT_SIZE } from '../../prefabs/bounds';
-import { useSpinChanged } from '../../prefabs/useSpinChanged';
-import { TextObject, TextStyle } from '../../scene';
+import type { TextObject, TextStyle } from '../../scene';
 import {
     COLOR_BLACK,
     COLOR_BLUE,
@@ -35,8 +34,9 @@ import {
     useSceneTheme,
 } from '../../theme';
 import { useControlStyles } from '../../useControlStyles';
+import { useObjectUpdater } from '../../useObjectUpdater';
 import { commonValue } from '../../util';
-import { PropertiesControlProps } from '../PropertiesControl';
+import type { PropertiesControlProps } from '../PropertiesControl';
 
 const AlignLeft = bundleIcon(TextAlignLeftFilled, TextAlignLeftRegular);
 const AlignCenter = bundleIcon(TextAlignCenterFilled, TextAlignCenterRegular);
@@ -50,15 +50,13 @@ export const TextOutlineControl: React.FC<PropertiesControlProps<TextObject>> = 
     const theme = useSceneTheme();
     const classes = useControlStyles();
     const { dispatch } = useScene();
+    const update = useObjectUpdater(objects);
 
     const stroke = commonValue(objects, (obj) => obj.stroke);
     const style = commonValue(objects, (obj) => obj.style);
 
-    const handleStrokeChanged = (stroke: string, transient: boolean) =>
-        dispatch({ type: 'update', value: objects.map((obj) => ({ ...obj, stroke })), transient });
-
-    const handleStyleChanged = (style: TextStyle) =>
-        dispatch({ type: 'update', value: objects.map((obj) => ({ ...obj, style })) });
+    const handleStrokeChanged = (stroke: string, transient: boolean) => update({ props: { stroke }, transient });
+    const handleStyleChanged = (style: TextStyle) => update({ props: { style } });
 
     const swatches = [
         makeColorSwatch(COLOR_RED, 'red'),
@@ -111,22 +109,18 @@ export const TextOutlineControl: React.FC<PropertiesControlProps<TextObject>> = 
 
 export const TextLayoutControl: React.FC<PropertiesControlProps<TextObject>> = ({ objects }) => {
     const classes = useControlStyles();
-    const { dispatch } = useScene();
+    const update = useObjectUpdater(objects);
 
     const fontSize = commonValue(objects, (obj) => obj.fontSize);
     const align = commonValue(objects, (obj) => obj.align);
 
-    const onFontSizeChanged = useSpinChanged((fontSize: number) =>
-        dispatch({ type: 'update', value: objects.map((obj) => ({ ...obj, fontSize })) }),
-    );
-
-    const onAlignChanged = (align: string) =>
-        dispatch({ type: 'update', value: objects.map((obj) => ({ ...obj, align })) });
+    const onFontSizeChanged = (fontSize: number) => update({ props: { fontSize } });
+    const onAlignChanged = (align: string) => update({ props: { align } });
 
     return (
         <div className={classes.row}>
             <Field label="Font size">
-                <SpinButton value={fontSize} onChange={onFontSizeChanged} min={MIN_FONT_SIZE} step={5} />
+                <SpinButton value={fontSize} onValueChange={onFontSizeChanged} min={MIN_FONT_SIZE} step={5} />
             </Field>
             <Field label="Align">
                 <SegmentedGroup name="text-align" value={align} onChange={(ev, data) => onAlignChanged(data.value)}>
@@ -141,11 +135,11 @@ export const TextLayoutControl: React.FC<PropertiesControlProps<TextObject>> = (
 
 export const TextValueControl: React.FC<PropertiesControlProps<TextObject>> = ({ objects }) => {
     const { dispatch } = useScene();
+    const update = useObjectUpdater(objects);
 
     const text = commonValue(objects, (obj) => obj.text);
 
-    const setText = (text: string) =>
-        dispatch({ type: 'update', value: objects.map((obj) => ({ ...obj, text })), transient: true });
+    const setText = (text: string) => update({ props: { text }, transient: true });
 
     // TODO: add autoAdjustHeight once implemented
     return (

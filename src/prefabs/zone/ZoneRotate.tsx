@@ -1,82 +1,48 @@
 import Konva from 'konva';
-import { ShapeConfig } from 'konva/lib/Shape';
-import React, { CSSProperties, RefObject, useRef } from 'react';
+import type { ShapeConfig } from 'konva/lib/Shape';
+import React, { type CSSProperties, type RefObject, useRef } from 'react';
 import { Circle, Path } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
 import CounterClockwiseIcon from '../../assets/zone/rotate_ccw.svg?react';
 import ClockwiseIcon from '../../assets/zone/rotate_cw.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { CircleZone, ObjectType } from '../../scene';
+import { type CircleZone, type ObjectPrototype, ObjectType } from '../../scene';
 import { CENTER_DOT_RADIUS, panelVars } from '../../theme';
 import { useKonvaCache } from '../../useKonvaCache';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { RadiusObjectContainer } from '../RadiusObjectContainer';
 import { useHighlightProps, useOverrideProps } from '../highlight';
 import { getArrowStyle, getShadowColor, getZoneStyle } from './style';
 
-const DEFAULT_RADIUS = 25;
+const DEFAULT_RADIUS = 50;
 const DEFAULT_OPACITY = 50;
 const CLOCKWISE_COLOR = '#fc972b';
 const COUNTER_CLOCKWISE_COLOR = '#0066ff';
 
 export const ZoneRotateClockwise: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-    return (
-        <PrefabIcon
-            draggable
-            name="Rotating clockwise"
-            icon={<ClockwiseIcon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.RotateCW,
-                        color: CLOCKWISE_COLOR,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
+    const object: ObjectPrototype<CircleZone> = {
+        type: ObjectType.RotateCW,
+        color: CLOCKWISE_COLOR,
+        opacity: DEFAULT_OPACITY,
+        radius: DEFAULT_RADIUS,
+    };
+
+    return <PrefabIcon name="Rotating clockwise" icon={<ClockwiseIcon />} object={object} renderDrag />;
 };
 
 export const ZoneRotateCounterClockwise: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-    return (
-        <PrefabIcon
-            draggable
-            name="Rotating counter-clockwise"
-            icon={<CounterClockwiseIcon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.RotateCCW,
-                        color: COUNTER_CLOCKWISE_COLOR,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<CircleZone>([ObjectType.RotateCW, ObjectType.RotateCCW], (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.RotateCW,
-            color: CLOCKWISE_COLOR,
-            opacity: DEFAULT_OPACITY,
-            radius: DEFAULT_RADIUS,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<CircleZone> = {
+        type: ObjectType.RotateCCW,
+        color: COUNTER_CLOCKWISE_COLOR,
+        opacity: DEFAULT_OPACITY,
+        radius: DEFAULT_RADIUS,
     };
-});
+
+    return <PrefabIcon name="Rotating counter-clockwise" icon={<CounterClockwiseIcon />} object={object} renderDrag />;
+};
 
 const Arrow: React.FC<ShapeConfig> = (props) => {
     return <Path data="M0-4-7 3-6 4-3 4 0 1 3 4 6 4 7 3Z" lineJoin="round" {...props} />;

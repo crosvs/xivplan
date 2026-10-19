@@ -1,6 +1,6 @@
-import { ColorSwatchProps, Theme, webDarkTheme, webLightTheme } from '@fluentui/react-components';
-import { ShapeConfig } from 'konva/lib/Shape';
-import { CSSProperties, useContext } from 'react';
+import { type ColorSwatchProps, type Theme, webDarkTheme, webLightTheme } from '@fluentui/react-components';
+import type { ShapeConfig } from 'konva/lib/Shape';
+import { type CSSProperties, use } from 'react';
 import { DarkModeContext } from './ThemeContext';
 import { cssPropertiesToStyleString, themeToCssProperties, themeToCssVars, themeToTokensObject } from './themeUtil';
 
@@ -108,6 +108,7 @@ const sceneTheme: SceneTheme = {
 export const sceneVars = themeToCssVars(sceneTheme);
 export const sceneTokens = themeToTokensObject(sceneTheme);
 
+// eslint-disable-next-line @eslint-react/no-unnecessary-use-prefix
 export function useSceneTheme(): SceneTheme {
     return sceneTheme;
 }
@@ -184,7 +185,7 @@ export const panelVars = themeToCssVars(darkPanelTheme);
 export const panelTokens = themeToTokensObject(darkPanelTheme);
 
 export function usePanelTheme() {
-    const darkMode = useContext(DarkModeContext);
+    const darkMode = use(DarkModeContext);
 
     return darkMode ? darkPanelTheme : lightPanelTheme;
 }

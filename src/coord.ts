@@ -1,7 +1,16 @@
 import { Stage } from 'konva/lib/Stage';
-import { Vector2d } from 'konva/lib/types';
+import type { Vector2d } from 'konva/lib/types';
 import { getObjectById, useScene } from './SceneProvider';
-import { isMoveable, isRotateable, MoveableObject, RotateableObject, Scene, SceneObject, SceneStep } from './scene';
+import {
+    isMoveable,
+    isRotateable,
+    type Arena,
+    type MoveableObject,
+    type RotateableObject,
+    type Scene,
+    type SceneObject,
+    type SceneStep,
+} from './scene';
 import { degtorad, round } from './util';
 import { vecAngle } from './vector';
 
@@ -16,13 +25,13 @@ export interface Position {
     readonly positionParentId?: number;
 }
 
-export function getCanvasX(scene: Scene, x: number): number {
-    const center = scene.arena.width / 2 + scene.arena.padding;
+export function getCanvasX(arena: Arena, x: number): number {
+    const center = arena.width / 2 + arena.padding;
     return center + x;
 }
 
-export function getCanvasY(scene: Scene, y: number): number {
-    const center = scene.arena.height / 2 + scene.arena.padding;
+export function getCanvasY(arena: Arena, y: number): number {
+    const center = arena.height / 2 + arena.padding;
     return center - y;
 }
 
@@ -55,67 +64,73 @@ export function getAbsolutePosition(scene: Scene, p: Position): Vector2d {
     return { x: parent.x + p.x, y: parent.y + p.y };
 }
 
-export function getCanvasCoord(scene: Scene, p: Position): Vector2d {
+export function getCanvasCoord(scene: Scene, arena: Arena, p: Position): Vector2d {
     const absolutePos = getAbsolutePosition(scene, p);
-    return { x: getCanvasX(scene, absolutePos.x), y: getCanvasY(scene, absolutePos.y) };
+    return { x: getCanvasX(arena, absolutePos.x), y: getCanvasY(arena, absolutePos.y) };
 }
 
-export function getCanvasCoordInStep(scene: Scene, step: SceneStep, p: Position): Vector2d {
+export function getCanvasCoordInStep(step: SceneStep, arena: Arena, p: Position): Vector2d {
     const absolutePos = getAbsolutePositionInStep(step, p);
-    return { x: getCanvasX(scene, absolutePos.x), y: getCanvasY(scene, absolutePos.y) };
+    return { x: getCanvasX(arena, absolutePos.x), y: getCanvasY(arena, absolutePos.y) };
 }
 
-export function getCanvasSize(scene: Scene): { width: number; height: number } {
+export function getCanvasSize(arena: Arena): { width: number; height: number } {
     return {
-        width: scene.arena.width + scene.arena.padding * 2,
-        height: scene.arena.height + scene.arena.padding * 2,
+        width: arena.width + arena.padding * 2,
+        height: arena.height + arena.padding * 2,
     };
 }
 
-export function getCanvasArenaRect(scene: Scene): { x: number; y: number; width: number; height: number } {
-    const { x, y } = getCanvasCoord(scene, { x: -scene.arena.width / 2, y: scene.arena.height / 2 });
-    const width = scene.arena.width;
-    const height = scene.arena.height;
+export function getCanvasArenaRect(
+    scene: Scene,
+    arena: Arena,
+): { x: number; y: number; width: number; height: number } {
+    const { x, y } = getCanvasCoord(scene, arena, { x: -arena.width / 2, y: arena.height / 2 });
+    const width = arena.width;
+    const height = arena.height;
 
     return { x, y, width, height };
 }
 
-export function getCanvasArenaEllipse(scene: Scene): { x: number; y: number; radiusX: number; radiusY: number } {
-    const { x, y } = getCanvasCoord(scene, { x: 0, y: 0 });
-    const radiusX = scene.arena.width / 2;
-    const radiusY = scene.arena.height / 2;
+export function getCanvasArenaEllipse(
+    scene: Scene,
+    arena: Arena,
+): { x: number; y: number; radiusX: number; radiusY: number } {
+    const { x, y } = getCanvasCoord(scene, arena, { x: 0, y: 0 });
+    const radiusX = arena.width / 2;
+    const radiusY = arena.height / 2;
 
     return { x, y, radiusX, radiusY };
 }
 
 export function useCanvasCoord(p: Position): Vector2d {
-    const { scene } = useScene();
-    return getCanvasCoord(scene, p);
+    const { scene, arena } = useScene();
+    return getCanvasCoord(scene, arena, p);
 }
 
 export function useCanvasArenaRect(): { x: number; y: number; width: number; height: number } {
-    const { scene } = useScene();
-    return getCanvasArenaRect(scene);
+    const { scene, arena } = useScene();
+    return getCanvasArenaRect(scene, arena);
 }
 
 export function useCanvasArenaEllipse(): { x: number; y: number; radiusX: number; radiusY: number } {
-    const { scene } = useScene();
-    return getCanvasArenaEllipse(scene);
+    const { scene, arena } = useScene();
+    return getCanvasArenaEllipse(scene, arena);
 }
 
-export function getSceneX(scene: Scene, x: number): number {
-    const center = scene.arena.width / 2 + scene.arena.padding;
+function getArenaX(arena: Arena, x: number): number {
+    const center = arena.width / 2 + arena.padding;
     return x - center;
 }
 
-export function getSceneY(scene: Scene, y: number): number {
-    const center = scene.arena.height / 2 + scene.arena.padding;
+function getArenaY(arena: Arena, y: number): number {
+    const center = arena.height / 2 + arena.padding;
     return center - y;
 }
 
-export function getSceneCoord(scene: Scene, p: Position): Vector2d {
+export function getSceneCoord(scene: Scene, arena: Arena, p: Position): Vector2d {
     const absolutePos = getAbsolutePosition(scene, p);
-    return round({ x: getSceneX(scene, absolutePos.x), y: getSceneY(scene, absolutePos.y) });
+    return round({ x: getArenaX(arena, absolutePos.x), y: getArenaY(arena, absolutePos.y) });
 }
 
 /**
@@ -226,7 +241,7 @@ export function getPointerAngle(pos: Vector2d): number {
     return vecAngle(pos);
 }
 
-export function getPointerPosition(scene: Scene, stage: Stage | undefined | null): Vector2d | null {
+export function getPointerPosition(scene: Scene, arena: Arena, stage: Stage | undefined | null): Vector2d | null {
     // getRelativePointerPosition() (rather than getPointerPosition()) accounts for the
     // stage's own pan/zoom transform, so this keeps returning the correct scene position
     // when the view has been panned or zoomed.
@@ -234,7 +249,7 @@ export function getPointerPosition(scene: Scene, stage: Stage | undefined | null
     if (!pos) {
         return null;
     }
-    return getSceneCoord(scene, pos);
+    return getSceneCoord(scene, arena, pos);
 }
 
 export interface Circle {

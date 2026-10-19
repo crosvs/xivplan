@@ -1,15 +1,13 @@
-import { CircleConfig } from 'konva/lib/shapes/Circle';
+import type { CircleConfig } from 'konva/lib/shapes/Circle';
 import React from 'react';
 import { Circle } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
 import Icon from '../../assets/zone/meteor_tower.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { registerListComponent, type ListComponentProps } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { ObjectType, TowerZone } from '../../scene';
+import { ObjectType, type ObjectPrototype, type TowerZone } from '../../scene';
 import { CENTER_DOT_RADIUS, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { RadiusObjectContainer } from '../RadiusObjectContainer';
@@ -22,39 +20,16 @@ const DEFAULT_RADIUS = 40;
 const DEFAULT_COUNT = 1;
 
 export const ZoneTower: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-
-    return (
-        <PrefabIcon
-            draggable
-            name="Meteor/tower"
-            icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Tower,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<TowerZone>(ObjectType.Tower, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Tower,
-            color: DEFAULT_COLOR,
-            opacity: DEFAULT_AOE_OPACITY,
-            radius: DEFAULT_RADIUS,
-            count: DEFAULT_COUNT,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<TowerZone> = {
+        type: ObjectType.Tower,
+        color: DEFAULT_COLOR,
+        opacity: DEFAULT_AOE_OPACITY,
+        radius: DEFAULT_RADIUS,
+        count: DEFAULT_COUNT,
     };
-});
+
+    return <PrefabIcon name="Tower" icon={<Icon />} object={object} renderDrag />;
+};
 
 const CountZone: React.FC<CircleConfig> = (props) => {
     const offset = (props.radius ?? 0) * 0.15;
@@ -113,7 +88,7 @@ const TowerDetails: React.FC<ListComponentProps<TowerZone>> = ({ object, ...prop
     return (
         <DetailsItem
             icon={<Icon width="100%" height="100%" style={{ [panelVars.colorZoneOrange]: object.color }} />}
-            name="Meteor/tower"
+            name="Tower"
             object={object}
             {...props}
         />

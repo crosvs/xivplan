@@ -1,21 +1,19 @@
 import { ToggleButton, Tooltip } from '@fluentui/react-components';
 import { EyeLinesRegular, EyeOffRegular, EyeRegular } from '@fluentui/react-icons';
 import React from 'react';
-import { BaseObject } from '../../scene';
-import { useScene } from '../../SceneProvider';
-import { commonValue, setOrOmit } from '../../util';
-import { PropertiesControlProps } from '../PropertiesControl';
+import type { BaseObject } from '../../scene';
+import { setOrOmitAction, useObjectUpdater } from '../../useObjectUpdater';
+import { commonValue } from '../../util';
+import type { PropertiesControlProps } from '../PropertiesControl';
 
 export const HideControl: React.FC<PropertiesControlProps<BaseObject>> = ({ objects }) => {
-    const { dispatch } = useScene();
+    const update = useObjectUpdater(objects);
 
     const show = commonValue(objects, (obj) => !obj.hide);
+    const icon = getIcon(show);
+    const tooltip = getTooltip(show);
 
-    const handleToggle = () =>
-        dispatch({ type: 'update', value: objects.map((obj) => setOrOmit(obj, 'hide', !!show)) });
-
-    const icon = show === undefined ? <EyeLinesRegular /> : show ? <EyeRegular /> : <EyeOffRegular />;
-    const tooltip = show ? 'Hide' : 'Show';
+    const handleToggle = () => update(setOrOmitAction<BaseObject>('hide', !!show));
 
     return (
         <>
@@ -25,3 +23,11 @@ export const HideControl: React.FC<PropertiesControlProps<BaseObject>> = ({ obje
         </>
     );
 };
+
+function getIcon(show: boolean | undefined) {
+    return show === undefined ? <EyeLinesRegular /> : show ? <EyeRegular /> : <EyeOffRegular />;
+}
+
+function getTooltip(show: boolean | undefined) {
+    return show === undefined ? 'Multiple visibilities' : show ? 'Shown' : 'Hidden';
+}

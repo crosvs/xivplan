@@ -1,4 +1,4 @@
-import { Vector2d } from 'konva/lib/types';
+import type { Vector2d } from 'konva/lib/types';
 import { degtorad, radtodeg } from './util';
 
 export const VEC_ZERO: Vector2d = { x: 0, y: 0 };
@@ -19,6 +19,11 @@ export function vecMult(v: Vector2d, d: number): Vector2d {
     return { x: v.x * d, y: v.y * d };
 }
 
+/** Calculates the dot product between two vectors */
+export function vecDot(a: Vector2d, b: Vector2d): number {
+    return a.x * b.x + a.y * b.y;
+}
+
 export function distance(a: Vector2d, b?: Vector2d): number {
     const v = b ? vecSub(a, b) : a;
     return Math.sqrt(v.x * v.x + v.y * v.y);
@@ -34,6 +39,10 @@ export function vecUnit(v: Vector2d): Vector2d {
 }
 
 export function vecAngle(v: Vector2d): number {
+    if (v.x === 0 && v.y === 0) {
+        return 0;
+    }
+
     return 90 - radtodeg(Math.atan2(v.y, v.x));
 }
 
@@ -97,4 +106,12 @@ export function getDistanceFromLine(p1: Vector2d, p2: Vector2d, q: Vector2d) {
         Math.abs((p2.y - p1.y) * q.x - (p2.x - p1.x) * q.y + p2.x * p1.y - p2.y * p1.x) /
         Math.sqrt(Math.pow(p2.y - p1.y, 2) + Math.pow(p2.x - p1.x, 2))
     );
+}
+
+/** Calculates the vector projection of a onto b. */
+export function vecProject(a: Vector2d, b: Vector2d): Vector2d {
+    if (b.x == 0 && b.y == 0) {
+        return VEC_ZERO;
+    }
+    return vecMult(b, vecDot(a, b) / vecDot(b, b));
 }

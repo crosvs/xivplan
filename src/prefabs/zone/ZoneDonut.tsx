@@ -1,14 +1,12 @@
 import React from 'react';
 import { Circle, Ring } from 'react-konva';
 import Icon from '../../assets/zone/donut.svg?react';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
+import { type ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
 import { LayerName } from '../../render/layers';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
-import { DonutZone, ObjectType } from '../../scene';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
+import { type DonutZone, type ObjectPrototype, ObjectType } from '../../scene';
 import { CENTER_DOT_RADIUS, DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { useHighlightProps, useOverrideProps } from '../highlight';
 import { PrefabIcon } from '../PrefabIcon';
@@ -21,39 +19,16 @@ const DEFAULT_OUTER_RADIUS = 150;
 const DEFAULT_INNER_RADIUS = 50;
 
 export const ZoneDonut: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-
-    return (
-        <PrefabIcon
-            draggable
-            name={NAME}
-            icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Donut,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<DonutZone>(ObjectType.Donut, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Donut,
-            color: DEFAULT_AOE_COLOR,
-            opacity: DEFAULT_AOE_OPACITY,
-            innerRadius: DEFAULT_INNER_RADIUS,
-            radius: DEFAULT_OUTER_RADIUS,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<DonutZone> = {
+        type: ObjectType.Donut,
+        color: DEFAULT_AOE_COLOR,
+        opacity: DEFAULT_AOE_OPACITY,
+        innerRadius: DEFAULT_INNER_RADIUS,
+        radius: DEFAULT_OUTER_RADIUS,
     };
-});
+
+    return <PrefabIcon name={NAME} icon={<Icon />} object={object} renderDrag />;
+};
 
 interface DonutRendererProps extends RendererProps<DonutZone> {
     radius: number;

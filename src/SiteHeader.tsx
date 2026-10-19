@@ -19,7 +19,7 @@ import {
     WeatherMoonFilled,
     WeatherSunnyFilled,
 } from '@fluentui/react-icons';
-import React, { HTMLAttributes, useContext, useState } from 'react';
+import React, { type HTMLAttributes, use, useState } from 'react';
 import { OutPortal } from 'react-reverse-portal';
 import { AboutDialog } from './AboutDialog';
 import { ExternalLink } from './ExternalLink';
@@ -99,9 +99,9 @@ const useStyles = makeStyles({
 
 export const SiteHeader: React.FC<HTMLAttributes<HTMLElement>> = ({ className, ...props }) => {
     const classes = useStyles();
-    const toolbarNode = useContext(ToolbarContext);
-    const [, setHelpOpen] = useContext(HelpContext);
-    const [darkMode, setDarkMode] = useContext(DarkModeContext);
+    const toolbarNode = use(ToolbarContext);
+    const [, setHelpOpen] = use(HelpContext);
+    const [darkMode, setDarkMode] = use(DarkModeContext);
     const [aboutOpen, setAboutOpen] = useState(false);
     const [previewMode] = usePreviewMode();
     // Reactive to actual available width (see headerStages.ts) rather than tied to portrait

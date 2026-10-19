@@ -1,4 +1,4 @@
-import { Textarea, TextareaProps } from '@fluentui/react-components';
+import { Textarea, type TextareaProps } from '@fluentui/react-components';
 import React from 'react';
 
 export interface DeferredTextareaProps extends TextareaProps {
@@ -15,7 +15,6 @@ export const DeferredTextarea: React.FC<DeferredTextareaProps> = ({ value, onBlu
     const handleBlur: BlurHandler = (ev) => {
         onBlur?.(ev);
         onCommit?.();
-        console.log('blur');
     };
 
     return <Textarea value={value ?? ''} onBlur={handleBlur} {...props} />;

@@ -2,37 +2,20 @@ import Konva from 'konva';
 import React, { useLayoutEffect, useState } from 'react';
 import { Group, Image as KonvaImage, Rect, Text } from 'react-konva';
 import useImage from 'use-image';
-import { getDragOffset, registerDropHandler } from '../DropHandler';
 import { DetailsItem } from '../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../panel/ListComponentRegistry';
-import { RendererProps, registerRenderer } from '../render/ObjectRegistry';
+import { type ListComponentProps, registerListComponent } from '../panel/ListComponentRegistry';
+import { type RendererProps, registerRenderer } from '../render/ObjectRegistry';
 import { LayerName } from '../render/layers';
-import { IconObject, ObjectType } from '../scene';
+import { type IconObject, type ObjectPrototype, ObjectType } from '../scene';
 import { DEFAULT_IMAGE_OPACITY } from '../theme';
 import { useImageTracked } from '../useObjectLoading';
-import { usePanelDrag } from '../usePanelDrag';
 import { HideGroup } from './HideGroup';
 import { PrefabIcon } from './PrefabIcon';
 import { ResizeableObjectContainer } from './ResizeableObjectContainer';
+import { ModifierKeyBehavior } from './controlpoints';
 import { useHighlightProps, useOverrideProps } from './highlight';
 
 const DEFAULT_SIZE = 32;
-
-registerDropHandler<IconObject>(ObjectType.Icon, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Icon,
-            image: '',
-            width: DEFAULT_SIZE,
-            height: DEFAULT_SIZE,
-            rotation: 0,
-            opacity: DEFAULT_IMAGE_OPACITY,
-            ...object,
-            ...position,
-        } as IconObject,
-    };
-});
 
 interface IconTimerProps {
     time: number;
@@ -93,20 +76,26 @@ const IconRenderer: React.FC<RendererProps<IconObject>> = ({ object }) => {
     const [image] = useImageTracked(object.image);
 
     return (
-        <ResizeableObjectContainer object={object} transformerProps={{ centeredScaling: true }}>
-            {(groupProps) => (
-                <Group {...groupProps} {...overrideProps}>
+        <ResizeableObjectContainer
+            object={object}
+            transformationProps={{
+                centerScalingBehavior: ModifierKeyBehavior.ForceEnabled,
+                keepRatioBehavior: ModifierKeyBehavior.Inverted,
+            }}
+        >
+            {(state) => (
+                <Group {...state} {...overrideProps}>
                     {highlightProps && (
                         <Rect
-                            width={object.width}
-                            height={object.height}
-                            cornerRadius={(object.width + object.height) / 2 / 5}
+                            width={state.width}
+                            height={state.height}
+                            cornerRadius={(state.width + state.height) / 2 / 5}
                             {...highlightProps}
                         />
                     )}
-                    <HideGroup>
-                        <KonvaImage image={image} width={object.width} height={object.height} />
-                        <IconTimer time={object.time ?? 0} width={object.width} height={object.height} />
+                    <HideGroup opacity={object.opacity / 100}>
+                        <KonvaImage image={image} width={state.width} height={state.height} />
+                        <IconTimer time={object.time ?? 0} width={state.width} height={state.height} />
                     </HideGroup>
                 </Group>
             )}
@@ -131,7 +120,6 @@ export interface StatusIconProps {
 }
 
 export const StatusIcon: React.FC<StatusIconProps> = ({ name, icon, iconId, maxStacks, scale }) => {
-    const [, setDragObject] = usePanelDrag();
     const [image] = useImage(icon);
 
     scale = scale ?? 1;
@@ -144,28 +132,26 @@ export const StatusIcon: React.FC<StatusIconProps> = ({ name, icon, iconId, maxS
         height /= scale;
     }
 
+    const object: ObjectPrototype<IconObject> = {
+        type: ObjectType.Icon,
+        image: icon,
+        name,
+        width: width ?? DEFAULT_SIZE,
+        height: height ?? DEFAULT_SIZE,
+        iconId,
+        maxStacks,
+        rotation: 0,
+        opacity: DEFAULT_IMAGE_OPACITY,
+    };
+
     return (
         <PrefabIcon
-            draggable
             name={name}
             title={getTitle(name, maxStacks)}
             icon={icon}
             width={width}
             height={height}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Icon,
-                        image: icon,
-                        name,
-                        width,
-                        height,
-                        iconId,
-                        maxStacks,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
+            object={object}
         />
     );
 };

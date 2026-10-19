@@ -1,7 +1,7 @@
 import { Tooltip, makeStyles, tokens } from '@fluentui/react-components';
 import React from 'react';
-import { ConsensusProgress, RelayHealth } from './nostr';
-import { RelayInfo, RelayStatusResult, aggregateRelayStatus } from './useRelayStatus';
+import { type ConsensusProgress, type RelayHealth } from './nostr';
+import { type RelayInfo, type RelayStatusResult, aggregateRelayStatus } from './useRelayStatus';
 
 const SIZE = 20;
 const STROKE = 2.5;

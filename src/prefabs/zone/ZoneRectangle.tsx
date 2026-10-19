@@ -1,14 +1,12 @@
 import React from 'react';
 import { Group, Rect } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
 import Icon from '../../assets/zone/square.svg?react';
 import { DetailsItem } from '../../panel/DetailsItem';
-import { ListComponentProps, registerListComponent } from '../../panel/ListComponentRegistry';
-import { registerRenderer, RendererProps } from '../../render/ObjectRegistry';
+import { registerListComponent, type ListComponentProps } from '../../panel/ListComponentRegistry';
+import { registerRenderer, type RendererProps } from '../../render/ObjectRegistry';
 import { LayerName } from '../../render/layers';
-import { ObjectType, RectangleZone } from '../../scene';
+import { ObjectType, type ObjectPrototype, type RectangleZone } from '../../scene';
 import { DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
-import { usePanelDrag } from '../../usePanelDrag';
 import { HideGroup } from '../HideGroup';
 import { PrefabIcon } from '../PrefabIcon';
 import { ResizeableObjectContainer } from '../ResizeableObjectContainer';
@@ -20,70 +18,53 @@ const NAME = 'Rectangle';
 const DEFAULT_SIZE = 150;
 
 export const ZoneSquare: React.FC = () => {
-    const [, setDragObject] = usePanelDrag();
-    return (
-        <PrefabIcon
-            draggable
-            name={NAME}
-            icon={<Icon />}
-            onDragStart={(e) => {
-                setDragObject({
-                    object: {
-                        type: ObjectType.Rect,
-                        width: DEFAULT_SIZE,
-                        height: DEFAULT_SIZE,
-                    },
-                    offset: getDragOffset(e),
-                });
-            }}
-        />
-    );
-};
-
-registerDropHandler<RectangleZone>(ObjectType.Rect, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Rect,
-            color: DEFAULT_AOE_COLOR,
-            opacity: DEFAULT_AOE_OPACITY,
-            width: DEFAULT_SIZE,
-            height: DEFAULT_SIZE,
-            rotation: 0,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<RectangleZone> = {
+        type: ObjectType.Rect,
+        color: DEFAULT_AOE_COLOR,
+        opacity: DEFAULT_AOE_OPACITY,
+        width: DEFAULT_SIZE,
+        height: DEFAULT_SIZE,
+        rotation: 0,
     };
-});
+
+    return <PrefabIcon name={NAME} icon={<Icon />} object={object} renderDrag />;
+};
 
 const RectangleRenderer: React.FC<RendererProps<RectangleZone>> = ({ object }) => {
     const highlightProps = useHighlightProps(object);
     const overrideProps = useOverrideProps(object);
 
-    const style = getZoneStyle(object.color, object.opacity, Math.min(object.width, object.height), object.hollow);
-
-    const highlightOffset = style.strokeWidth;
-    const highlightWidth = object.width + highlightOffset;
-    const highlightHeight = object.height + highlightOffset;
-
     return (
-        <ResizeableObjectContainer object={object} transformerProps={{ keepRatio: false }}>
-            {(groupProps) => (
-                <Group {...groupProps} {...overrideProps}>
-                    {highlightProps && (
-                        <Rect
-                            offsetX={highlightOffset / 2}
-                            offsetY={highlightOffset / 2}
-                            width={highlightWidth}
-                            height={highlightHeight}
-                            {...highlightProps}
-                        />
-                    )}
-                    <HideGroup>
-                        <Rect width={object.width} height={object.height} {...style} />
-                    </HideGroup>
-                </Group>
-            )}
+        <ResizeableObjectContainer object={object}>
+            {(state) => {
+                const style = getZoneStyle(
+                    object.color,
+                    object.opacity,
+                    Math.min(state.width, state.height),
+                    object.hollow,
+                );
+
+                const highlightOffset = style.strokeWidth;
+                const highlightWidth = state.width + highlightOffset;
+                const highlightHeight = state.height + highlightOffset;
+
+                return (
+                    <Group {...state} {...overrideProps}>
+                        {highlightProps && (
+                            <Rect
+                                offsetX={highlightOffset / 2}
+                                offsetY={highlightOffset / 2}
+                                width={highlightWidth}
+                                height={highlightHeight}
+                                {...highlightProps}
+                            />
+                        )}
+                        <HideGroup>
+                            <Rect width={state.width} height={state.height} {...style} />
+                        </HideGroup>
+                    </Group>
+                );
+            }}
         </ResizeableObjectContainer>
     );
 };

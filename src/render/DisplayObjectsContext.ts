@@ -1,8 +1,8 @@
-import { createContext, useContext } from 'react';
-import { SceneObject } from '../scene';
+import { createContext, use } from 'react';
+import { type SceneObject } from '../scene';
 
 export const DisplayObjectsContext = createContext<readonly SceneObject[]>([]);
 
 export function useDisplayObjectsList(): readonly SceneObject[] {
-    return useContext(DisplayObjectsContext);
+    return use(DisplayObjectsContext);
 }

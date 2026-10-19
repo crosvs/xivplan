@@ -1,6 +1,6 @@
-import { useContext } from 'react';
-import { ViewTransformContext, ViewTransformState } from './ViewTransformContext';
+import { use } from 'react';
+import { ViewTransformContext, type ViewTransformState } from './ViewTransformContext';
 
 export function useViewTransform(): ViewTransformState {
-    return useContext(ViewTransformContext);
+    return use(ViewTransformContext);
 }
