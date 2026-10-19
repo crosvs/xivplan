@@ -1,7 +1,6 @@
 import type { WedgeConfig } from 'konva/lib/shapes/Wedge';
 import React, { useState } from 'react';
 import { Group, Shape, Wedge } from 'react-konva';
-import { getDragOffset, registerDropHandler } from '../../DropHandler';
 import { useScene } from '../../SceneProvider';
 import Icon from '../../assets/zone/cone.svg?react';
 import { getAbsoluteRotation, getBaseFacingRotation } from '../../coord';
@@ -11,7 +10,7 @@ import { type ListComponentProps, registerListComponent } from '../../panel/List
 import { type RendererProps, registerRenderer } from '../../render/ObjectRegistry';
 import { ActivePortal } from '../../render/Portals';
 import { LayerName } from '../../render/layers';
-import { type ConeZone, ObjectType, type Scene } from '../../scene';
+import { type ConeZone, type ObjectPrototype, ObjectType, type Scene } from '../../scene';
 import { useIsDragging } from '../../selection';
 import { DEFAULT_AOE_COLOR, DEFAULT_AOE_OPACITY, panelVars } from '../../theme';
 import { type Enum, clampRotation, degtorad, mod360 } from '../../util';
@@ -37,42 +36,18 @@ const NAME = 'Cone';
 const DEFAULT_RADIUS = 150;
 const DEFAULT_ANGLE = 90;
 
-const ICON_SIZE = 32;
-
 export const ZoneCone: React.FC = () => {
-    return (
-        <PrefabIcon
-            name={NAME}
-            icon={<Icon />}
-            object={{
-                type: ObjectType.Cone,
-            }}
-            getOffset={(e) => {
-                const offset = getDragOffset(e);
-                return {
-                    x: offset.x,
-                    y: offset.y - ICON_SIZE / 2,
-                };
-            }}
-        />
-    );
-};
-
-registerDropHandler<ConeZone>(ObjectType.Cone, (object, position) => {
-    return {
-        type: 'add',
-        object: {
-            type: ObjectType.Cone,
-            color: DEFAULT_AOE_COLOR,
-            opacity: DEFAULT_AOE_OPACITY,
-            radius: DEFAULT_RADIUS,
-            coneAngle: DEFAULT_ANGLE,
-            rotation: 0,
-            ...object,
-            ...position,
-        },
+    const object: ObjectPrototype<ConeZone> = {
+        type: ObjectType.Cone,
+        color: DEFAULT_AOE_COLOR,
+        opacity: DEFAULT_AOE_OPACITY,
+        radius: DEFAULT_RADIUS,
+        coneAngle: DEFAULT_ANGLE,
+        rotation: 0,
     };
-});
+
+    return <PrefabIcon name={NAME} icon={<Icon />} object={object} renderDrag />;
+};
 
 interface OffsetWedgeProps extends WedgeConfig {
     shapeOffset: number;

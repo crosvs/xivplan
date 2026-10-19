@@ -542,8 +542,9 @@ const DropTarget: React.FC<DropTargetProps> = ({ stage, children }) => {
             return;
         }
 
-        position.x -= dragObject.offset.x / stage.scaleX();
-        position.y -= dragObject.offset.y / stage.scaleY();
+        // The offset is already in canvas units, adjusted for the zoom by PrefabIcon.
+        position.x -= dragObject.offset.x;
+        position.y -= dragObject.offset.y;
 
         const action = getDropAction(dragObject, getSceneCoord(scene, arena, position));
         if (action) {
